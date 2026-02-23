@@ -1,0 +1,599 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no" />
+  <title>てぼ屋の替玉係長 高橋さん（仮プロトタイプ）</title>
+  <style>
+    html,body{margin:0;padding:0;background:#111;color:#eee;font-family:system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,"Noto Sans JP","Hiragino Kaku Gothic ProN","Yu Gothic",sans-serif}
+    #wrap{display:flex;flex-direction:column;min-height:100vh}
+
+    /* HUDはそのまま */
+    #hud{padding:10px 12px;background:#161616;position:sticky;top:0;z-index:10}
+    #toprow{display:flex;gap:10px;align-items:center;justify-content:space-between;flex-wrap:wrap}
+    .pill{background:#222;border:1px solid #333;border-radius:999px;padding:6px 10px;font-size:14px;white-space:nowrap}
+    #orders{display:grid;grid-template-columns:repeat(2,1fr);gap:8px;margin-top:8px}
+    .orderCard{background:#1d1d1d;border:1px solid #333;border-radius:12px;padding:8px}
+    .orderTitle{display:flex;align-items:center;justify-content:space-between;font-size:13px;color:#cfcfcf;margin-bottom:6px}
+    .orderHard{font-size:18px;font-weight:700}
+    .badge{font-size:12px;background:#2a2a2a;border:1px solid #444;border-radius:8px;padding:2px 6px;color:#ddd}
+    #tip{font-size:12px;color:#9bd;opacity:0.95;margin-top:6px}
+
+    /* ★ここが修正点：PCではキャンバスを小さく中央寄せ（max-width固定） */
+    #canvasWrap{
+      flex:1;
+      display:flex;
+      justify-content:center;
+      align-items:flex-start;
+      padding:10px 0 0;
+    }
+    canvas{
+      width:min(520px, 96vw);     /* ← PCで大きくなりすぎない */
+      height:auto;
+      touch-action:none;
+      display:block;
+      background:linear-gradient(#101010,#0b0b0b);
+      border:1px solid #222;
+      border-radius:14px;
+    }
+
+    #footer{display:flex;gap:10px;justify-content:space-between;align-items:center;padding:10px 12px;background:#161616;border-top:1px solid #222}
+    button{background:#232323;color:#eee;border:1px solid #3a3a3a;border-radius:12px;padding:10px 12px;font-size:14px}
+    button:active{transform:scale(0.98)}
+    #log{font-size:12px;color:#aaa;max-width:60vw;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  </style>
+</head>
+<body>
+<div id="wrap">
+  <div id="hud">
+    <div id="toprow">
+      <div class="pill">残り <span id="timeLeft">45.0</span>s</div>
+      <div class="pill">スコア <span id="score">0</span> / コンボ ×<span id="combo">1</span></div>
+      <div class="pill" id="phrase">次！</div>
+    </div>
+    <div id="orders"></div>
+    <div id="tip">操作：右から出る麺をドラッグ→下の「てぼ」に入れる／てぼ内の麺をタップ→上へ発射（提供）</div>
+  </div>
+
+  <div id="canvasWrap">
+    <canvas id="c" width="420" height="720"></canvas>
+  </div>
+
+  <div id="footer">
+    <button id="adBtn">アルバイト召喚（仮）</button>
+    <div id="log">ログ：?</div>
+    <button id="resetBtn">リセット</button>
+  </div>
+</div>
+
+<script>
+(() => {
+  const canvas = document.getElementById('c');
+  const ctx = canvas.getContext('2d');
+
+  const ui = {
+    timeLeft: document.getElementById('timeLeft'),
+    score: document.getElementById('score'),
+    combo: document.getElementById('combo'),
+    orders: document.getElementById('orders'),
+    phrase: document.getElementById('phrase'),
+    log: document.getElementById('log'),
+    resetBtn: document.getElementById('resetBtn'),
+    adBtn: document.getElementById('adBtn'),
+  };
+
+  // ★修正：PCで巨大化しないよう、内部解像度も上限を絞る
+  function fitCanvas() {
+    const rect = canvas.getBoundingClientRect();
+    const cssW = rect.width;
+    const targetW = Math.min(520, Math.max(340, Math.floor(cssW)));
+    const targetH = Math.floor(targetW * (720/420)); // 初期比率に追従
+    canvas.width = targetW;
+    canvas.height = targetH;
+  }
+  window.addEventListener('resize', fitCanvas);
+  fitCanvas();
+
+  const GAME_TIME = 45.0;
+
+  const HARD = [
+    { key:'かた',   a:0.0, b:1.2, justA:0.4, justB:0.8 },
+    { key:'ふつう', a:1.2, b:2.4, justA:1.6, justB:2.0 },
+    { key:'やわ',   a:2.4, b:3.6, justA:2.8, justB:3.2 },
+  ];
+  const OVERCOOK = 3.6;
+
+  const NOODLE_SPAWN_MIN = 0.85;
+  const NOODLE_SPAWN_MAX = 1.25;
+
+  let t = 0;
+  let last = performance.now();
+  let timeLeft = GAME_TIME;
+  let score = 0;
+  let combo = 1;
+  let comboStreak = 0;
+
+  let laneCount = 2;
+  let lanes = [];
+  let flying = [];
+  let activeNoodle = null;
+
+  let pointer = { id:null, x:0, y:0, down:false };
+
+  let phraseTimer = 0;
+  function setPhrase(text, ms=900) {
+    ui.phrase.textContent = text;
+    phraseTimer = ms/1000;
+  }
+  function log(msg){
+    ui.log.textContent = 'ログ：' + msg;
+  }
+
+  function rand(a,b){ return a + Math.random()*(b-a); }
+  function clamp(v,a,b){ return Math.max(a, Math.min(b,v)); }
+  function dist2(ax,ay,bx,by){ const dx=ax-bx, dy=ay-by; return dx*dx+dy*dy; }
+
+  function hardnessByTime(sec){
+    if (sec >= OVERCOOK) return { key:'のび', just:false, ok:false };
+    const h = HARD.find(h => sec >= h.a && sec < h.b) || HARD[HARD.length-1];
+    const just = sec >= h.justA && sec <= h.justB;
+    return { key:h.key, just, ok:true };
+  }
+
+  function updateOrderUI(){
+    ui.orders.innerHTML = '';
+    ui.orders.style.gridTemplateColumns = `repeat(${laneCount}, 1fr)`;
+    for (let i=0;i<laneCount;i++){
+      const o = lanes[i].order;
+      const card = document.createElement('div');
+      card.className = 'orderCard';
+      card.innerHTML = `
+        <div class="orderTitle">
+          <span>客${i+1}</span>
+          <span class="badge">${o.special}</span>
+        </div>
+        <div class="orderHard">硬さ：${o.target}</div>
+        <div style="margin-top:4px;font-size:12px;color:#aaa">待ち：${o.patience.toFixed(1)}s</div>
+      `;
+      ui.orders.appendChild(card);
+    }
+  }
+
+  function newOrder(){
+    const target = HARD[Math.floor(Math.random()*HARD.length)].key;
+    return { target, patience: rand(6.0, 10.0), special:'通常' };
+  }
+
+  function initLanes(){
+    lanes = [];
+    for (let i=0;i<laneCount;i++){
+      lanes.push({
+        noodlesInBasket: [],
+        order: newOrder(),
+        auto: { enabled:false, timeLeft:0, usesLeft:0 },
+      });
+    }
+    updateOrderUI();
+  }
+
+  function syncHUD(){
+    ui.timeLeft.textContent = timeLeft.toFixed(1);
+    ui.score.textContent = score.toString();
+    ui.combo.textContent = combo.toString();
+  }
+
+  // ★修正点：客（ターゲット）を上に離すためのパラメータ
+  // 値を大きくすると、てぼからさらに離れます
+  const TARGET_LIFT_PX = 140;   // ←今回の主要修正
+  const TARGET_TOP_MIN = 72;    // 画面上に行きすぎないための安全値
+
+  function layout(){
+    const W = canvas.width, H = canvas.height;
+
+    // てぼゾーンを少し下に寄せて、客との距離も確保
+    const basketZoneH = H * 0.34;
+    const basketTop = H - basketZoneH;
+
+    const spout = { x: W - 18, y: basketTop - 110, r: 16 };
+
+    const pad = 12;
+    const laneW = (W - pad*(laneCount+1)) / laneCount;
+    const baskets = [];
+    for (let i=0;i<laneCount;i++){
+      const x = pad + i*(laneW+pad);
+      const y = basketTop + 18;
+      baskets.push({
+        x, y, w: laneW, h: basketZoneH - 36,
+        laneIndex: i,
+        cx: x + laneW/2,
+        cy: y + (basketZoneH - 36) * 0.62,
+      });
+    }
+
+    // ★客ターゲットを上へ（てぼと近すぎ問題を解消）
+    const targets = baskets.map(b => {
+      const baseY = basketTop - 32;
+      const liftedY = baseY - TARGET_LIFT_PX;
+      return {
+        x: b.cx,
+        y: Math.max(TARGET_TOP_MIN, liftedY),
+        r: 18
+      };
+    });
+
+    return { W,H, basketTop, spout, baskets, targets };
+  }
+
+  let spawnTimer = rand(NOODLE_SPAWN_MIN, NOODLE_SPAWN_MAX);
+  function spawnNoodle(geo){
+    activeNoodle = {
+      x: geo.spout.x - 30,
+      y: geo.spout.y,
+      r: 16,
+      vx: -40,
+      vy: 0,
+      dragging: false,
+      born: t,
+    };
+  }
+
+  function canvasPointFromEvent(e){
+    const rect = canvas.getBoundingClientRect();
+    const x = (e.clientX - rect.left) * (canvas.width / rect.width);
+    const y = (e.clientY - rect.top)  * (canvas.height / rect.height);
+    return {x,y};
+  }
+
+  canvas.addEventListener('pointerdown', (e) => {
+    canvas.setPointerCapture(e.pointerId);
+    pointer.id = e.pointerId;
+    pointer.down = true;
+    const p = canvasPointFromEvent(e);
+    pointer.x = p.x; pointer.y = p.y;
+
+    const geo = layout();
+
+    for (let i=0;i<laneCount;i++){
+      const arr = lanes[i].noodlesInBasket;
+      for (let j=arr.length-1;j>=0;j--){
+        const n = arr[j];
+        if (dist2(p.x,p.y,n.x,n.y) <= n.r*n.r){
+          fireFromBasket(i, j, geo);
+          return;
+        }
+      }
+    }
+
+    if (activeNoodle && dist2(p.x,p.y,activeNoodle.x,activeNoodle.y) <= activeNoodle.r*activeNoodle.r){
+      activeNoodle.dragging = true;
+      return;
+    }
+  });
+
+  canvas.addEventListener('pointermove', (e) => {
+    if (!pointer.down || e.pointerId !== pointer.id) return;
+    const p = canvasPointFromEvent(e);
+    pointer.x = p.x; pointer.y = p.y;
+    if (activeNoodle && activeNoodle.dragging){
+      activeNoodle.x = p.x;
+      activeNoodle.y = p.y;
+    }
+  });
+
+  canvas.addEventListener('pointerup', (e) => {
+    if (e.pointerId !== pointer.id) return;
+    pointer.down = false;
+    const p = canvasPointFromEvent(e);
+    pointer.x = p.x; pointer.y = p.y;
+
+    if (activeNoodle && activeNoodle.dragging){
+      activeNoodle.dragging = false;
+
+      const geo = layout();
+      const b = geo.baskets.find(b => p.x>=b.x && p.x<=b.x+b.w && p.y>=b.y && p.y<=b.y+b.h);
+      if (b){
+        lanes[b.laneIndex].noodlesInBasket.push({
+          cook: 0,
+          x: b.cx + rand(-18,18),
+          y: b.cy + rand(-18,18),
+          r: 14,
+          lane: b.laneIndex
+        });
+        log(`レーン${b.laneIndex+1}に投入`);
+        setPhrase('次！', 600);
+        activeNoodle = null;
+      }
+    }
+  });
+
+  function award(points, isJust){
+    score += points * combo;
+    comboStreak++;
+    if (comboStreak % 5 === 0) combo = Math.min(9, combo + 1);
+    if (isJust) setPhrase('硬さヨシ！', 900);
+    syncHUD();
+  }
+
+  function penalty(points){
+    score = Math.max(0, score - points);
+    combo = 1;
+    comboStreak = 0;
+    syncHUD();
+  }
+
+  function completeOrder(laneIndex){
+    lanes[laneIndex].order = newOrder();
+    updateOrderUI();
+  }
+
+  function fireFromBasket(laneIndex, noodleIndex, geo){
+    const lane = lanes[laneIndex];
+    const n = lane.noodlesInBasket.splice(noodleIndex, 1)[0];
+    const h = hardnessByTime(n.cook);
+
+    const target = geo.targets[laneIndex];
+    const dx = target.x - n.x;
+    const dy = target.y - n.y;
+    const len = Math.max(1, Math.hypot(dx,dy));
+    const speed = 560;
+    flying.push({ x:n.x, y:n.y, r:12, vx:dx/len*speed, vy:dy/len*speed, laneIndex, born:t });
+
+    const order = lane.order;
+
+    if (!h.ok){
+      log(`のび（レーン${laneIndex+1}）`);
+      setPhrase('焦ると“のび”る', 1200);
+      penalty(15);
+      order.patience = Math.max(0, order.patience - 1.5);
+      updateOrderUI();
+      return;
+    }
+
+    if (h.key === order.target){
+      if (h.just){
+        log(`ジャスト成功！ レーン${laneIndex+1}`);
+        award(20, true);
+      } else {
+        log(`成功 レーン${laneIndex+1}`);
+        award(10, false);
+      }
+      completeOrder(laneIndex);
+    } else {
+      log(`硬さミス（${h.key}→注文:${order.target}）`);
+      penalty(10);
+      order.patience = Math.max(0, order.patience - 2.0);
+      updateOrderUI();
+    }
+  }
+
+  ui.adBtn.addEventListener('click', () => {
+    const laneIndex = 0;
+    lanes[laneIndex].auto.enabled = true;
+    lanes[laneIndex].auto.timeLeft = 12.0;
+    lanes[laneIndex].auto.usesLeft = 6;
+    log('アルバイト（仮）: レーン1を12秒補助');
+  });
+
+  ui.resetBtn.addEventListener('click', reset);
+
+  function reset(){
+    t = 0;
+    timeLeft = GAME_TIME;
+    score = 0;
+    combo = 1;
+    comboStreak = 0;
+    flying = [];
+    activeNoodle = null;
+    spawnTimer = rand(NOODLE_SPAWN_MIN, NOODLE_SPAWN_MAX);
+    setPhrase('次！', 700);
+    initLanes();
+    log('リセットしました');
+    syncHUD();
+  }
+
+  function step(now){
+    const dt = Math.min(0.033, (now - last)/1000);
+    last = now;
+    t += dt;
+
+    if (phraseTimer > 0){
+      phraseTimer -= dt;
+      if (phraseTimer <= 0) ui.phrase.textContent = '次！';
+    }
+
+    if (timeLeft > 0) timeLeft = Math.max(0, timeLeft - dt);
+    syncHUD();
+
+    const geo = layout();
+
+    spawnTimer -= dt;
+    if (timeLeft > 0 && spawnTimer <= 0){
+      if (!activeNoodle) spawnNoodle(geo);
+      spawnTimer = rand(NOODLE_SPAWN_MIN, NOODLE_SPAWN_MAX);
+    }
+
+    if (activeNoodle && !activeNoodle.dragging){
+      activeNoodle.x += activeNoodle.vx * dt;
+      activeNoodle.x = clamp(activeNoodle.x, geo.W-140, geo.W-30);
+      activeNoodle.y = clamp(activeNoodle.y + Math.sin(t*2)*6*dt, 10, geo.basketTop-10);
+    }
+
+    for (let i=0;i<laneCount;i++){
+      const lane = lanes[i];
+
+      if (timeLeft > 0){
+        lane.order.patience = Math.max(0, lane.order.patience - dt);
+        if (lane.order.patience === 0){
+          penalty(5);
+          log(`客${i+1}が帰った…（-5）`);
+          lane.order = newOrder();
+          updateOrderUI();
+        }
+      }
+
+      for (const n of lane.noodlesInBasket) n.cook += dt;
+
+      if (lane.auto.enabled && timeLeft > 0){
+        lane.auto.timeLeft = Math.max(0, lane.auto.timeLeft - dt);
+        if (lane.auto.timeLeft === 0) lane.auto.enabled = false;
+
+        if (lane.auto.usesLeft > 0 && lane.noodlesInBasket.length > 0){
+          let idx = 0;
+          for (let j=1;j<lane.noodlesInBasket.length;j++){
+            if (lane.noodlesInBasket[j].cook > lane.noodlesInBasket[idx].cook) idx = j;
+          }
+          if (Math.random() < dt * 1.4){
+            fireFromBasket(i, idx, geo);
+            lane.auto.usesLeft--;
+          }
+        }
+      }
+    }
+
+    for (let i=flying.length-1;i>=0;i--){
+      const f = flying[i];
+      f.x += f.vx * dt;
+      f.y += f.vy * dt;
+      if (f.y < -60 || f.x < -60 || f.x > geo.W+60) flying.splice(i,1);
+    }
+
+    draw(geo);
+    requestAnimationFrame(step);
+  }
+
+  function draw(geo){
+    const {W,H,basketTop,spout,baskets,targets} = geo;
+
+    ctx.clearRect(0,0,W,H);
+
+    // Divider
+    ctx.fillStyle = '#0f0f0f';
+    ctx.fillRect(0, basketTop-2, W, 2);
+
+    // Spout
+    ctx.fillStyle = '#2a2a2a';
+    ctx.beginPath();
+    ctx.arc(spout.x, spout.y, spout.r, 0, Math.PI*2);
+    ctx.fill();
+    ctx.fillStyle = '#3a3a3a';
+    ctx.fillRect(spout.x-26, spout.y-10, 26, 20);
+
+    // Customers (higher)
+    for (let i=0;i<targets.length;i++){
+      ctx.fillStyle = '#1e1e1e';
+      ctx.beginPath();
+      ctx.arc(targets[i].x, targets[i].y, targets[i].r, 0, Math.PI*2);
+      ctx.fill();
+      ctx.strokeStyle = '#333';
+      ctx.lineWidth = 2;
+      ctx.stroke();
+
+      ctx.fillStyle = '#aaa';
+      ctx.font = '12px sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText(`客${i+1}`, targets[i].x, targets[i].y+4);
+    }
+
+    // Baskets
+    for (const b of baskets){
+      ctx.fillStyle = '#141414';
+      ctx.fillRect(b.x, b.y, b.w, b.h);
+      ctx.strokeStyle = '#333';
+      ctx.lineWidth = 2;
+      ctx.strokeRect(b.x, b.y, b.w, b.h);
+
+      ctx.fillStyle = '#888';
+      ctx.font = '12px sans-serif';
+      ctx.textAlign = 'left';
+      ctx.fillText(`てぼ${b.laneIndex+1}`, b.x+8, b.y+16);
+
+      const lane = lanes[b.laneIndex];
+      if (lane.auto.enabled){
+        ctx.fillStyle = '#9bd';
+        ctx.textAlign = 'right';
+        ctx.fillText(`バイト ${lane.auto.timeLeft.toFixed(0)}s`, b.x+b.w-8, b.y+16);
+      }
+
+      for (const n of lane.noodlesInBasket){
+        const h = hardnessByTime(n.cook);
+
+        let col = '#6b6b6b';
+        if (h.key === 'かた') col = '#c9b458';
+        if (h.key === 'ふつう') col = '#70c1b3';
+        if (h.key === 'やわ') col = '#a0c4ff';
+        if (h.key === 'のび') col = '#ffadad';
+
+        ctx.fillStyle = col;
+        ctx.beginPath();
+        ctx.arc(n.x, n.y, n.r, 0, Math.PI*2);
+        ctx.fill();
+
+        if (h.just){
+          ctx.strokeStyle = '#fff';
+          ctx.globalAlpha = 0.35;
+          ctx.lineWidth = 4;
+          ctx.beginPath();
+          ctx.arc(n.x, n.y, n.r+2, 0, Math.PI*2);
+          ctx.stroke();
+          ctx.globalAlpha = 1;
+        }
+      }
+
+      const order = lane.order;
+      ctx.fillStyle = '#ddd';
+      ctx.font = '14px sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText(`注文:${order.target}`, b.cx, b.y + b.h - 14);
+    }
+
+    // Active noodle
+    if (activeNoodle){
+      ctx.fillStyle = '#f4f4f4';
+      ctx.beginPath();
+      ctx.arc(activeNoodle.x, activeNoodle.y, activeNoodle.r, 0, Math.PI*2);
+      ctx.fill();
+      ctx.strokeStyle = '#333';
+      ctx.lineWidth = 2;
+      ctx.stroke();
+
+      ctx.fillStyle = '#aaa';
+      ctx.font = '12px sans-serif';
+      ctx.textAlign = 'left';
+      ctx.fillText('麺', activeNoodle.x + 18, activeNoodle.y + 4);
+    }
+
+    // Flying noodles
+    for (const f of flying){
+      ctx.fillStyle = '#fff';
+      ctx.beginPath();
+      ctx.arc(f.x, f.y, f.r, 0, Math.PI*2);
+      ctx.fill();
+    }
+
+    // Finish overlay
+    if (timeLeft <= 0){
+      ctx.fillStyle = 'rgba(0,0,0,0.55)';
+      ctx.fillRect(0,0,W,H);
+      ctx.fillStyle = '#fff';
+      ctx.font = '24px sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText('時間終了', W/2, H/2 - 14);
+      ctx.font = '16px sans-serif';
+      ctx.fillText(`スコア ${score}`, W/2, H/2 + 16);
+      ctx.font = '13px sans-serif';
+      ctx.fillStyle = '#ccc';
+      ctx.fillText('下の「リセット」で再開', W/2, H/2 + 40);
+    }
+  }
+
+  function resetAndStart(){
+    initLanes();
+    reset();
+    requestAnimationFrame(step);
+  }
+
+  resetAndStart();
+})();
+</script>
+</body>
+</html>
