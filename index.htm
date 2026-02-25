@@ -5,21 +5,71 @@
   <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no" />
   <title>てぼ屋の替玉係長 高橋さん（仮プロトタイプ）</title>
   <style>
-    html,body{margin:0;padding:0;background:#111;color:#eee;font-family:system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,"Noto Sans JP","Hiragino Kaku Gothic ProN","Yu Gothic",sans-serif}
+    html,body{
+      margin:0;padding:0;background:#111;color:#eee;
+      font-family:system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,"Noto Sans JP","Hiragino Kaku Gothic ProN","Yu Gothic",sans-serif;
+    }
     #wrap{display:flex;flex-direction:column;min-height:100vh}
 
-    /* HUDはそのまま */
-    #hud{padding:10px 12px;background:#161616;position:sticky;top:0;z-index:10}
-    #toprow{display:flex;gap:10px;align-items:center;justify-content:space-between;flex-wrap:wrap}
-    .pill{background:#222;border:1px solid #333;border-radius:999px;padding:6px 10px;font-size:14px;white-space:nowrap}
-    #orders{display:grid;grid-template-columns:repeat(2,1fr);gap:8px;margin-top:8px}
-    .orderCard{background:#1d1d1d;border:1px solid #333;border-radius:12px;padding:8px}
-    .orderTitle{display:flex;align-items:center;justify-content:space-between;font-size:13px;color:#cfcfcf;margin-bottom:6px}
-    .orderHard{font-size:18px;font-weight:700}
-    .badge{font-size:12px;background:#2a2a2a;border:1px solid #444;border-radius:8px;padding:2px 6px;color:#ddd}
-    #tip{font-size:12px;color:#9bd;opacity:0.95;margin-top:6px}
+    #hud{
+      padding:10px 12px;background:#161616;position:sticky;top:0;z-index:10;
+      border-bottom:1px solid #232323;
+    }
+    #toprow{
+      display:flex;gap:10px;align-items:center;justify-content:space-between;flex-wrap:wrap;
+      margin-bottom:8px;
+    }
+    .pill{
+      background:#222;border:1px solid #333;border-radius:999px;padding:6px 10px;
+      font-size:14px;white-space:nowrap;
+    }
 
-    /* ★ここが修正点：PCではキャンバスを小さく中央寄せ（max-width固定） */
+    /* ★上段＝指示、下段＝客アイコン（同一列グリッド） */
+    #orderInstructions,
+    #customerIcons{
+      display:grid;
+      grid-template-columns:repeat(2,1fr);
+      gap:8px;
+    }
+    #customerIcons{ margin-top:6px; }
+
+    .orderCard{
+      background:#1d1d1d;border:1px solid #333;border-radius:12px;padding:8px;
+    }
+    .orderTitle{
+      display:flex;align-items:center;justify-content:space-between;
+      font-size:12px;color:#cfcfcf;margin-bottom:6px;
+    }
+    .orderHard{
+      font-size:18px;font-weight:700;line-height:1.2;
+    }
+    .orderMeta{
+      margin-top:4px;font-size:12px;color:#aaa;
+    }
+    .badge{
+      font-size:12px;background:#2a2a2a;border:1px solid #444;border-radius:8px;padding:2px 6px;color:#ddd;
+    }
+
+    .customerCard{
+      background:#181818;border:1px solid #2e2e2e;border-radius:12px;
+      padding:8px; display:flex; align-items:center; gap:8px; min-height:48px;
+    }
+    .customerAvatar{
+      width:30px;height:30px;border-radius:50%;
+      background:#2b2b2b;border:1px solid #444;
+      display:flex;align-items:center;justify-content:center;
+      font-size:14px;
+      flex:0 0 auto;
+    }
+    .customerText{
+      font-size:12px;color:#cfcfcf;line-height:1.2;
+    }
+    .customerName{font-weight:700;color:#eee;font-size:13px}
+
+    #tip{
+      font-size:12px;color:#9bd;opacity:.95;margin-top:8px;
+    }
+
     #canvasWrap{
       flex:1;
       display:flex;
@@ -28,7 +78,7 @@
       padding:10px 0 0;
     }
     canvas{
-      width:min(520px, 96vw);     /* ← PCで大きくなりすぎない */
+      width:min(520px, 96vw);
       height:auto;
       touch-action:none;
       display:block;
@@ -37,10 +87,18 @@
       border-radius:14px;
     }
 
-    #footer{display:flex;gap:10px;justify-content:space-between;align-items:center;padding:10px 12px;background:#161616;border-top:1px solid #222}
-    button{background:#232323;color:#eee;border:1px solid #3a3a3a;border-radius:12px;padding:10px 12px;font-size:14px}
+    #footer{
+      display:flex;gap:10px;justify-content:space-between;align-items:center;
+      padding:10px 12px;background:#161616;border-top:1px solid #222;
+    }
+    button{
+      background:#232323;color:#eee;border:1px solid #3a3a3a;border-radius:12px;
+      padding:10px 12px;font-size:14px;
+    }
     button:active{transform:scale(0.98)}
-    #log{font-size:12px;color:#aaa;max-width:60vw;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+    #log{
+      font-size:12px;color:#aaa;max-width:60vw;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+    }
   </style>
 </head>
 <body>
@@ -51,8 +109,13 @@
       <div class="pill">スコア <span id="score">0</span> / コンボ ×<span id="combo">1</span></div>
       <div class="pill" id="phrase">次！</div>
     </div>
-    <div id="orders"></div>
-    <div id="tip">操作：右から出る麺をドラッグ→下の「てぼ」に入れる／てぼ内の麺をタップ→上へ発射（提供）</div>
+
+    <!-- 上段：指示 -->
+    <div id="orderInstructions"></div>
+    <!-- 下段：客アイコン（列位置は上段と同じ） -->
+    <div id="customerIcons"></div>
+
+    <div id="tip">操作：右から出る麺をドラッグ→下の「てぼ」に入れる／てぼ内の麺をタップ→上方向へ提供</div>
   </div>
 
   <div id="canvasWrap">
@@ -61,7 +124,7 @@
 
   <div id="footer">
     <button id="adBtn">アルバイト召喚（仮）</button>
-    <div id="log">ログ：?</div>
+    <div id="log">ログ：—</div>
     <button id="resetBtn">リセット</button>
   </div>
 </div>
@@ -75,37 +138,45 @@
     timeLeft: document.getElementById('timeLeft'),
     score: document.getElementById('score'),
     combo: document.getElementById('combo'),
-    orders: document.getElementById('orders'),
+    orderInstructions: document.getElementById('orderInstructions'),
+    customerIcons: document.getElementById('customerIcons'),
     phrase: document.getElementById('phrase'),
     log: document.getElementById('log'),
     resetBtn: document.getElementById('resetBtn'),
     adBtn: document.getElementById('adBtn'),
   };
 
-  // ★修正：PCで巨大化しないよう、内部解像度も上限を絞る
   function fitCanvas() {
     const rect = canvas.getBoundingClientRect();
     const cssW = rect.width;
     const targetW = Math.min(520, Math.max(340, Math.floor(cssW)));
-    const targetH = Math.floor(targetW * (720/420)); // 初期比率に追従
+    const targetH = Math.floor(targetW * (720/420));
     canvas.width = targetW;
     canvas.height = targetH;
   }
   window.addEventListener('resize', fitCanvas);
   fitCanvas();
 
+  // ========= Game constants =========
   const GAME_TIME = 45.0;
+  const laneCount = 2; // 仮版固定（2レーン）
 
   const HARD = [
-    { key:'かた',   a:0.0, b:1.2, justA:0.4, justB:0.8 },
-    { key:'ふつう', a:1.2, b:2.4, justA:1.6, justB:2.0 },
-    { key:'やわ',   a:2.4, b:3.6, justA:2.8, justB:3.2 },
+    { key:'かた',   a:0.0, b:1.2, justA:0.4, justB:0.8, color:'#c9b458' },
+    { key:'ふつう', a:1.2, b:2.4, justA:1.6, justB:2.0, color:'#70c1b3' },
+    { key:'やわ',   a:2.4, b:3.6, justA:2.8, justB:3.2, color:'#a0c4ff' },
   ];
   const OVERCOOK = 3.6;
+  const OVERCOOK_COLOR = '#ffadad';
 
   const NOODLE_SPAWN_MIN = 0.85;
   const NOODLE_SPAWN_MAX = 1.25;
 
+  // 客アイコン（仮）
+  const CUSTOMER_EMOJIS = ['🙂','😐','😄','🧢','👓','🧑'];
+  const CUSTOMER_NAMES  = ['モブ客A','モブ客B','モブ客C','常連','仕事帰り','学生'];
+
+  // ========= State =========
   let t = 0;
   let last = performance.now();
   let timeLeft = GAME_TIME;
@@ -113,55 +184,51 @@
   let combo = 1;
   let comboStreak = 0;
 
-  let laneCount = 2;
   let lanes = [];
-  let flying = [];
-  let activeNoodle = null;
+  let flying = [];      // 提供アニメ
+  let activeNoodle = null;  // ドラッグ中の麺
+  let spawnTimer = rand(NOODLE_SPAWN_MIN, NOODLE_SPAWN_MAX);
 
   let pointer = { id:null, x:0, y:0, down:false };
-
   let phraseTimer = 0;
-  function setPhrase(text, ms=900) {
+
+  function rand(a,b){ return a + Math.random()*(b-a); }
+  function clamp(v,a,b){ return Math.max(a, Math.min(b,v)); }
+  function dist2(ax,ay,bx,by){ const dx=ax-bx, dy=ay-by; return dx*dx+dy*dy; }
+
+  function setPhrase(text, ms=900){
     ui.phrase.textContent = text;
     phraseTimer = ms/1000;
   }
   function log(msg){
     ui.log.textContent = 'ログ：' + msg;
   }
-
-  function rand(a,b){ return a + Math.random()*(b-a); }
-  function clamp(v,a,b){ return Math.max(a, Math.min(b,v)); }
-  function dist2(ax,ay,bx,by){ const dx=ax-bx, dy=ay-by; return dx*dx+dy*dy; }
-
-  function hardnessByTime(sec){
-    if (sec >= OVERCOOK) return { key:'のび', just:false, ok:false };
-    const h = HARD.find(h => sec >= h.a && sec < h.b) || HARD[HARD.length-1];
-    const just = sec >= h.justA && sec <= h.justB;
-    return { key:h.key, just, ok:true };
+  function syncHUD(){
+    ui.timeLeft.textContent = timeLeft.toFixed(1);
+    ui.score.textContent = score.toString();
+    ui.combo.textContent = combo.toString();
   }
 
-  function updateOrderUI(){
-    ui.orders.innerHTML = '';
-    ui.orders.style.gridTemplateColumns = `repeat(${laneCount}, 1fr)`;
-    for (let i=0;i<laneCount;i++){
-      const o = lanes[i].order;
-      const card = document.createElement('div');
-      card.className = 'orderCard';
-      card.innerHTML = `
-        <div class="orderTitle">
-          <span>客${i+1}</span>
-          <span class="badge">${o.special}</span>
-        </div>
-        <div class="orderHard">硬さ：${o.target}</div>
-        <div style="margin-top:4px;font-size:12px;color:#aaa">待ち：${o.patience.toFixed(1)}s</div>
-      `;
-      ui.orders.appendChild(card);
-    }
+  function hardnessByTime(sec){
+    if (sec >= OVERCOOK) return { key:'のび', just:false, ok:false, color:OVERCOOK_COLOR };
+    const h = HARD.find(h => sec >= h.a && sec < h.b) || HARD[HARD.length-1];
+    const just = sec >= h.justA && sec <= h.justB;
+    return { key:h.key, just, ok:true, color:h.color };
+  }
+
+  function randomCustomer(){
+    const i = Math.floor(Math.random() * CUSTOMER_EMOJIS.length);
+    return { emoji: CUSTOMER_EMOJIS[i], name: CUSTOMER_NAMES[i] };
   }
 
   function newOrder(){
     const target = HARD[Math.floor(Math.random()*HARD.length)].key;
-    return { target, patience: rand(6.0, 10.0), special:'通常' };
+    return {
+      target,
+      patience: rand(6.0, 10.0),
+      special: '通常',
+      customer: randomCustomer(),
+    };
   }
 
   function initLanes(){
@@ -173,31 +240,76 @@
         auto: { enabled:false, timeLeft:0, usesLeft:0 },
       });
     }
-    updateOrderUI();
+    updateTopRows();
   }
 
-  function syncHUD(){
-    ui.timeLeft.textContent = timeLeft.toFixed(1);
-    ui.score.textContent = score.toString();
-    ui.combo.textContent = combo.toString();
+  // ★上段（指示）＋下段（客アイコン）を同じ列で描画
+  function updateTopRows(){
+    ui.orderInstructions.innerHTML = '';
+    ui.customerIcons.innerHTML = '';
+    ui.orderInstructions.style.gridTemplateColumns = `repeat(${laneCount}, 1fr)`;
+    ui.customerIcons.style.gridTemplateColumns = `repeat(${laneCount}, 1fr)`;
+
+    for (let i=0;i<laneCount;i++){
+      const lane = lanes[i];
+      const o = lane.order;
+
+      // 上段：指示
+      const oc = document.createElement('div');
+      oc.className = 'orderCard';
+      oc.innerHTML = `
+        <div class="orderTitle">
+          <span>レーン${i+1} 指示</span>
+          <span class="badge">${o.special}</span>
+        </div>
+        <div class="orderHard">硬さ：${o.target}</div>
+        <div class="orderMeta">待ち：${o.patience.toFixed(1)}s</div>
+      `;
+      ui.orderInstructions.appendChild(oc);
+
+      // 下段：客アイコン
+      const cc = document.createElement('div');
+      cc.className = 'customerCard';
+      cc.innerHTML = `
+        <div class="customerAvatar">${o.customer.emoji}</div>
+        <div class="customerText">
+          <div class="customerName">${o.customer.name}</div>
+          <div>替玉待ち</div>
+        </div>
+      `;
+      ui.customerIcons.appendChild(cc);
+    }
   }
 
-  // ★修正点：客（ターゲット）を上に離すためのパラメータ
-  // 値を大きくすると、てぼからさらに離れます
-  const TARGET_LIFT_PX = 140;   // ←今回の主要修正
-  const TARGET_TOP_MIN = 72;    // 画面上に行きすぎないための安全値
+  function completeOrder(laneIndex){
+    lanes[laneIndex].order = newOrder();
+    updateTopRows();
+  }
 
+  // ========= Layout =========
+  // 客アイコンはキャンバス内に置かない。中央を飛行空間にする。
+  // 右側には硬さ凡例パネルを配置。
   function layout(){
     const W = canvas.width, H = canvas.height;
 
-    // てぼゾーンを少し下に寄せて、客との距離も確保
-    const basketZoneH = H * 0.34;
+    // 右側凡例スペース
+    const rightPanelW = Math.max(92, Math.floor(W * 0.23));
+    const playW = W - rightPanelW - 8; // 中央〜左がプレイ空間
+    const rightPanelX = W - rightPanelW;
+
+    // 下部てぼゾーン
+    const basketZoneH = H * 0.33;
     const basketTop = H - basketZoneH;
 
-    const spout = { x: W - 18, y: basketTop - 110, r: 16 };
+    // 麺の排出口（右端だが、凡例パネルより左側）
+    const spout = {
+      x: playW - 12,
+      y: basketTop - 90,
+      r: 16
+    };
 
     const pad = 12;
-    const laneW = (W - pad*(laneCount+1)) / laneCount;
+    const laneW = (playW - pad * (laneCount + 1)) / laneCount;
     const baskets = [];
     for (let i=0;i<laneCount;i++){
       const x = pad + i*(laneW+pad);
@@ -210,33 +322,40 @@
       });
     }
 
-    // ★客ターゲットを上へ（てぼと近すぎ問題を解消）
-    const targets = baskets.map(b => {
-      const baseY = basketTop - 32;
-      const liftedY = baseY - TARGET_LIFT_PX;
-      return {
-        x: b.cx,
-        y: Math.max(TARGET_TOP_MIN, liftedY),
-        r: 18
-      };
-    });
+    // 提供先（キャンバス内の上部・見えない目標点）。客アイコンはHUDにあるので描画しない
+    const targets = baskets.map((b, i) => ({
+      x: b.cx,
+      y: Math.max(56, basketTop - 190), // かなり上に
+      r: 1
+    }));
 
-    return { W,H, basketTop, spout, baskets, targets };
-  }
-
-  let spawnTimer = rand(NOODLE_SPAWN_MIN, NOODLE_SPAWN_MAX);
-  function spawnNoodle(geo){
-    activeNoodle = {
-      x: geo.spout.x - 30,
-      y: geo.spout.y,
-      r: 16,
-      vx: -40,
-      vy: 0,
-      dragging: false,
-      born: t,
+    // 凡例パネル
+    const legend = {
+      x: rightPanelX + 6,
+      y: 10,
+      w: rightPanelW - 12,
+      h: Math.min(H * 0.48, 220)
     };
+
+    return { W,H, playW, basketTop, spout, baskets, targets, legend, rightPanelX, rightPanelW };
   }
 
+  function reset(){
+    t = 0;
+    timeLeft = GAME_TIME;
+    score = 0;
+    combo = 1;
+    comboStreak = 0;
+    flying = [];
+    activeNoodle = null;
+    spawnTimer = rand(NOODLE_SPAWN_MIN, NOODLE_SPAWN_MAX);
+    setPhrase('次！', 700);
+    initLanes();
+    syncHUD();
+    log('リセットしました');
+  }
+
+  // ========= Input =========
   function canvasPointFromEvent(e){
     const rect = canvas.getBoundingClientRect();
     const x = (e.clientX - rect.left) * (canvas.width / rect.width);
@@ -253,6 +372,7 @@
 
     const geo = layout();
 
+    // てぼ内の麺タップで提供
     for (let i=0;i<laneCount;i++){
       const arr = lanes[i].noodlesInBasket;
       for (let j=arr.length-1;j>=0;j--){
@@ -264,9 +384,9 @@
       }
     }
 
+    // 出現麺を掴む
     if (activeNoodle && dist2(p.x,p.y,activeNoodle.x,activeNoodle.y) <= activeNoodle.r*activeNoodle.r){
       activeNoodle.dragging = true;
-      return;
     }
   });
 
@@ -274,6 +394,7 @@
     if (!pointer.down || e.pointerId !== pointer.id) return;
     const p = canvasPointFromEvent(e);
     pointer.x = p.x; pointer.y = p.y;
+
     if (activeNoodle && activeNoodle.dragging){
       activeNoodle.x = p.x;
       activeNoodle.y = p.y;
@@ -288,7 +409,6 @@
 
     if (activeNoodle && activeNoodle.dragging){
       activeNoodle.dragging = false;
-
       const geo = layout();
       const b = geo.baskets.find(b => p.x>=b.x && p.x<=b.x+b.w && p.y>=b.y && p.y<=b.y+b.h);
       if (b){
@@ -299,12 +419,25 @@
           r: 14,
           lane: b.laneIndex
         });
-        log(`レーン${b.laneIndex+1}に投入`);
-        setPhrase('次！', 600);
         activeNoodle = null;
+        log(`レーン${b.laneIndex+1}に投入`);
+        setPhrase('次！', 550);
       }
     }
   });
+
+  // ========= Spawn / Score =========
+  function spawnNoodle(geo){
+    activeNoodle = {
+      x: geo.spout.x - 26,
+      y: geo.spout.y,
+      r: 16,
+      vx: -34,
+      vy: 0,
+      dragging: false,
+      born: t,
+    };
+  }
 
   function award(points, isJust){
     score += points * combo;
@@ -321,31 +454,32 @@
     syncHUD();
   }
 
-  function completeOrder(laneIndex){
-    lanes[laneIndex].order = newOrder();
-    updateOrderUI();
-  }
-
   function fireFromBasket(laneIndex, noodleIndex, geo){
     const lane = lanes[laneIndex];
     const n = lane.noodlesInBasket.splice(noodleIndex, 1)[0];
     const h = hardnessByTime(n.cook);
-
     const target = geo.targets[laneIndex];
+
+    // 飛行アニメ（客アイコンはHUDなので、上方向へ飛ぶだけ）
     const dx = target.x - n.x;
     const dy = target.y - n.y;
     const len = Math.max(1, Math.hypot(dx,dy));
-    const speed = 560;
-    flying.push({ x:n.x, y:n.y, r:12, vx:dx/len*speed, vy:dy/len*speed, laneIndex, born:t });
+    const speed = 600;
+    flying.push({
+      x:n.x, y:n.y, r:12,
+      vx: dx/len*speed,
+      vy: dy/len*speed,
+      laneIndex,
+      ttl: 0.55
+    });
 
     const order = lane.order;
-
     if (!h.ok){
       log(`のび（レーン${laneIndex+1}）`);
       setPhrase('焦ると“のび”る', 1200);
       penalty(15);
       order.patience = Math.max(0, order.patience - 1.5);
-      updateOrderUI();
+      updateTopRows();
       return;
     }
 
@@ -362,11 +496,13 @@
       log(`硬さミス（${h.key}→注文:${order.target}）`);
       penalty(10);
       order.patience = Math.max(0, order.patience - 2.0);
-      updateOrderUI();
+      updateTopRows();
     }
   }
 
+  // ========= Buttons =========
   ui.adBtn.addEventListener('click', () => {
+    // 仮：レーン1を補助
     const laneIndex = 0;
     lanes[laneIndex].auto.enabled = true;
     lanes[laneIndex].auto.timeLeft = 12.0;
@@ -376,21 +512,7 @@
 
   ui.resetBtn.addEventListener('click', reset);
 
-  function reset(){
-    t = 0;
-    timeLeft = GAME_TIME;
-    score = 0;
-    combo = 1;
-    comboStreak = 0;
-    flying = [];
-    activeNoodle = null;
-    spawnTimer = rand(NOODLE_SPAWN_MIN, NOODLE_SPAWN_MAX);
-    setPhrase('次！', 700);
-    initLanes();
-    log('リセットしました');
-    syncHUD();
-  }
-
+  // ========= Main loop =========
   function step(now){
     const dt = Math.min(0.033, (now - last)/1000);
     last = now;
@@ -401,38 +523,48 @@
       if (phraseTimer <= 0) ui.phrase.textContent = '次！';
     }
 
-    if (timeLeft > 0) timeLeft = Math.max(0, timeLeft - dt);
+    if (timeLeft > 0){
+      timeLeft = Math.max(0, timeLeft - dt);
+    }
     syncHUD();
 
     const geo = layout();
 
+    // 麺の自動排出
     spawnTimer -= dt;
     if (timeLeft > 0 && spawnTimer <= 0){
       if (!activeNoodle) spawnNoodle(geo);
       spawnTimer = rand(NOODLE_SPAWN_MIN, NOODLE_SPAWN_MAX);
     }
 
+    // 出現麺（未ドラッグ）の漂い
     if (activeNoodle && !activeNoodle.dragging){
       activeNoodle.x += activeNoodle.vx * dt;
-      activeNoodle.x = clamp(activeNoodle.x, geo.W-140, geo.W-30);
-      activeNoodle.y = clamp(activeNoodle.y + Math.sin(t*2)*6*dt, 10, geo.basketTop-10);
+      activeNoodle.x = clamp(activeNoodle.x, Math.max(40, geo.playW - 150), geo.playW - 26);
+      activeNoodle.y = clamp(activeNoodle.y + Math.sin(t*2.1)*8*dt, 14, geo.basketTop - 14);
     }
 
+    // レーン更新
     for (let i=0;i<laneCount;i++){
       const lane = lanes[i];
 
+      // 客待ち時間
       if (timeLeft > 0){
         lane.order.patience = Math.max(0, lane.order.patience - dt);
         if (lane.order.patience === 0){
           penalty(5);
-          log(`客${i+1}が帰った…（-5）`);
+          log(`レーン${i+1} 客が帰った…（-5）`);
           lane.order = newOrder();
-          updateOrderUI();
+          updateTopRows();
         }
       }
 
-      for (const n of lane.noodlesInBasket) n.cook += dt;
+      // 茹で時間進行
+      for (const n of lane.noodlesInBasket){
+        n.cook += dt;
+      }
 
+      // アルバイト仮
       if (lane.auto.enabled && timeLeft > 0){
         lane.auto.timeLeft = Math.max(0, lane.auto.timeLeft - dt);
         if (lane.auto.timeLeft === 0) lane.auto.enabled = false;
@@ -442,7 +574,7 @@
           for (let j=1;j<lane.noodlesInBasket.length;j++){
             if (lane.noodlesInBasket[j].cook > lane.noodlesInBasket[idx].cook) idx = j;
           }
-          if (Math.random() < dt * 1.4){
+          if (Math.random() < dt * 1.3){
             fireFromBasket(i, idx, geo);
             lane.auto.usesLeft--;
           }
@@ -450,27 +582,41 @@
       }
     }
 
+    // 飛行麺
     for (let i=flying.length-1;i>=0;i--){
       const f = flying[i];
       f.x += f.vx * dt;
       f.y += f.vy * dt;
-      if (f.y < -60 || f.x < -60 || f.x > geo.W+60) flying.splice(i,1);
+      f.ttl -= dt;
+      if (f.ttl <= 0 || f.y < -50 || f.x < -50 || f.x > canvas.width + 50){
+        flying.splice(i,1);
+      }
     }
 
     draw(geo);
     requestAnimationFrame(step);
   }
 
+  // ========= Draw =========
   function draw(geo){
-    const {W,H,basketTop,spout,baskets,targets} = geo;
-
+    const {W,H,playW,basketTop,spout,baskets,legend,rightPanelX,rightPanelW} = geo;
     ctx.clearRect(0,0,W,H);
 
-    // Divider
-    ctx.fillStyle = '#0f0f0f';
-    ctx.fillRect(0, basketTop-2, W, 2);
+    // 右側凡例パネル背景（硬さ色の明示）
+    ctx.fillStyle = '#141414';
+    ctx.fillRect(rightPanelX, 0, rightPanelW, H);
+    ctx.strokeStyle = '#262626';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(rightPanelX + 0.5, 0);
+    ctx.lineTo(rightPanelX + 0.5, H);
+    ctx.stroke();
 
-    // Spout
+    // 中央飛行スペース（客アイコンなし）
+    ctx.fillStyle = '#0f0f0f';
+    ctx.fillRect(0, basketTop - 2, playW, 2);
+
+    // 排出口
     ctx.fillStyle = '#2a2a2a';
     ctx.beginPath();
     ctx.arc(spout.x, spout.y, spout.r, 0, Math.PI*2);
@@ -478,23 +624,7 @@
     ctx.fillStyle = '#3a3a3a';
     ctx.fillRect(spout.x-26, spout.y-10, 26, 20);
 
-    // Customers (higher)
-    for (let i=0;i<targets.length;i++){
-      ctx.fillStyle = '#1e1e1e';
-      ctx.beginPath();
-      ctx.arc(targets[i].x, targets[i].y, targets[i].r, 0, Math.PI*2);
-      ctx.fill();
-      ctx.strokeStyle = '#333';
-      ctx.lineWidth = 2;
-      ctx.stroke();
-
-      ctx.fillStyle = '#aaa';
-      ctx.font = '12px sans-serif';
-      ctx.textAlign = 'center';
-      ctx.fillText(`客${i+1}`, targets[i].x, targets[i].y+4);
-    }
-
-    // Baskets
+    // てぼレーン
     for (const b of baskets){
       ctx.fillStyle = '#141414';
       ctx.fillRect(b.x, b.y, b.w, b.h);
@@ -502,11 +632,13 @@
       ctx.lineWidth = 2;
       ctx.strokeRect(b.x, b.y, b.w, b.h);
 
+      // レーン名
       ctx.fillStyle = '#888';
       ctx.font = '12px sans-serif';
       ctx.textAlign = 'left';
       ctx.fillText(`てぼ${b.laneIndex+1}`, b.x+8, b.y+16);
 
+      // バイト表示
       const lane = lanes[b.laneIndex];
       if (lane.auto.enabled){
         ctx.fillStyle = '#9bd';
@@ -514,16 +646,11 @@
         ctx.fillText(`バイト ${lane.auto.timeLeft.toFixed(0)}s`, b.x+b.w-8, b.y+16);
       }
 
+      // てぼ内の麺
       for (const n of lane.noodlesInBasket){
         const h = hardnessByTime(n.cook);
 
-        let col = '#6b6b6b';
-        if (h.key === 'かた') col = '#c9b458';
-        if (h.key === 'ふつう') col = '#70c1b3';
-        if (h.key === 'やわ') col = '#a0c4ff';
-        if (h.key === 'のび') col = '#ffadad';
-
-        ctx.fillStyle = col;
+        ctx.fillStyle = h.color;
         ctx.beginPath();
         ctx.arc(n.x, n.y, n.r, 0, Math.PI*2);
         ctx.fill();
@@ -539,14 +666,15 @@
         }
       }
 
+      // てぼ下部に現在注文（簡易）
       const order = lane.order;
       ctx.fillStyle = '#ddd';
-      ctx.font = '14px sans-serif';
+      ctx.font = '13px sans-serif';
       ctx.textAlign = 'center';
-      ctx.fillText(`注文:${order.target}`, b.cx, b.y + b.h - 14);
+      ctx.fillText(`注文:${order.target}`, b.cx, b.y + b.h - 12);
     }
 
-    // Active noodle
+    // 出現中の麺
     if (activeNoodle){
       ctx.fillStyle = '#f4f4f4';
       ctx.beginPath();
@@ -562,7 +690,7 @@
       ctx.fillText('麺', activeNoodle.x + 18, activeNoodle.y + 4);
     }
 
-    // Flying noodles
+    // 飛行麺（客アイコンは描かない）
     for (const f of flying){
       ctx.fillStyle = '#fff';
       ctx.beginPath();
@@ -570,7 +698,10 @@
       ctx.fill();
     }
 
-    // Finish overlay
+    // ★硬さ凡例（右側空スペース）
+    drawHardnessLegend(legend);
+
+    // 時間終了
     if (timeLeft <= 0){
       ctx.fillStyle = 'rgba(0,0,0,0.55)';
       ctx.fillRect(0,0,W,H);
@@ -586,13 +717,73 @@
     }
   }
 
-  function resetAndStart(){
-    initLanes();
-    reset();
-    requestAnimationFrame(step);
+  function drawHardnessLegend(legend){
+    const x = legend.x, y = legend.y, w = legend.w, h = legend.h;
+    ctx.fillStyle = '#191919';
+    ctx.fillRect(x, y, w, h);
+    ctx.strokeStyle = '#2f2f2f';
+    ctx.lineWidth = 1;
+    ctx.strokeRect(x, y, w, h);
+
+    ctx.fillStyle = '#eee';
+    ctx.font = '12px sans-serif';
+    ctx.textAlign = 'left';
+    ctx.fillText('硬さ色', x + 8, y + 16);
+
+    let cy = y + 34;
+    const rowH = 22;
+
+    const items = [
+      {label:'かた', color:HARD[0].color},
+      {label:'ふつう', color:HARD[1].color},
+      {label:'やわ', color:HARD[2].color},
+      {label:'のび', color:OVERCOOK_COLOR},
+    ];
+
+    for (const item of items){
+      ctx.fillStyle = item.color;
+      ctx.fillRect(x + 8, cy - 10, 16, 10);
+      ctx.strokeStyle = '#444';
+      ctx.strokeRect(x + 8, cy - 10, 16, 10);
+
+      ctx.fillStyle = '#d8d8d8';
+      ctx.font = '12px sans-serif';
+      ctx.fillText(item.label, x + 30, cy - 1);
+      cy += rowH;
+    }
+
+    cy += 4;
+    ctx.fillStyle = '#eee';
+    ctx.fillText('ジャスト', x + 8, cy + 2);
+
+    // ジャスト見本
+    const px = x + 18;
+    const py = cy + 24;
+    ctx.fillStyle = HARD[1].color;
+    ctx.beginPath();
+    ctx.arc(px, py, 7, 0, Math.PI*2);
+    ctx.fill();
+    ctx.strokeStyle = '#fff';
+    ctx.globalAlpha = 0.35;
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.arc(px, py, 10, 0, Math.PI*2);
+    ctx.stroke();
+    ctx.globalAlpha = 1;
+
+    ctx.fillStyle = '#cfcfcf';
+    ctx.font = '11px sans-serif';
+    ctx.fillText('白い輪 = ジャスト', x + 34, py + 4);
+
+    // 補足
+    ctx.fillStyle = '#9aa';
+    ctx.font = '10px sans-serif';
+    ctx.fillText('※博多硬さは後で追加予定', x + 8, Math.min(y + h - 8, py + 28));
   }
 
-  resetAndStart();
+  // ========= Start =========
+  reset();
+  requestAnimationFrame(step);
 })();
 </script>
 </body>
