@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no" />
-  <title>Tebo Shop Prototype - Layout Match (Master Sketch)</title>
+  <title>Tebo Shop Prototype - Visual Feedback Improved</title>
   <style>
     html, body {
       margin: 0;
@@ -115,9 +115,8 @@
     adBtn: document.getElementById('adBtn'),
   };
 
-  // ========= 基本設定 =========
   const GAME_TIME = 45;
-  const LANE_COUNT = 4; // ラフに合わせて4レーン表示
+  const LANE_COUNT = 4;
   const NOODLE_SPAWN_MIN = 0.75;
   const NOODLE_SPAWN_MAX = 1.15;
   const OVERCOOK = 3.6;
@@ -132,7 +131,6 @@
   const CUSTOMER_ICONS = ['🙂','😐','😑','😄','🧢','👓','🧑','👨'];
   const CUSTOMER_NAMES = ['客A','客B','客C','常連','会社員','学生','モブ客','お客さん'];
 
-  // ========= 状態 =========
   let last = performance.now();
   let t = 0;
   let timeLeft = GAME_TIME;
@@ -143,16 +141,16 @@
   let spawnTimer = rnd(NOODLE_SPAWN_MIN, NOODLE_SPAWN_MAX);
 
   let lanes = [];
-  let activeNoodle = null; // 右側から出て、ドラッグ投入する麺
-  let flying = [];         // 提供時に飛ぶ麺
+  let activeNoodle = null;
+  let flying = [];        // 飛行中の麺（客まで届く）
+  let impacts = [];       // 客に届いた瞬間のエフェクト
+  let laneToasts = [];    // 各レーン判定表示
   let pointer = { down:false, id:null, x:0, y:0 };
 
-  // ======= レイアウト（手描きラフ寄せ） =======
   function getLayout() {
     const W = canvas.width;
     const H = canvas.height;
 
-    // 右側：凡例エリア（固定）
     const legendW = 150;
     const boardPad = 18;
     const playX = boardPad;
@@ -160,15 +158,12 @@
     const playW = W - legendW - boardPad*2;
     const playH = H - boardPad*2;
 
-    // 上段：指示行 + 客アイコン行
-    const headerLineY = playY + 28;     // 「かた/やわ/普通」
-    const customerRowY = playY + 78;    // 顔アイコンの中心
+    const headerLineY = playY + 28;
+    const customerRowY = playY + 78;
 
-    // 下段：てぼ行
     const basketH = 110;
     const basketY = playY + playH - basketH - 6;
 
-    // 縦レーン幅
     const laneGap = 14;
     const laneW = (playW - laneGap*(LANE_COUNT-1)) / LANE_COUNT;
 
@@ -180,7 +175,7 @@
         x,
         w: laneW,
         centerX: x + laneW/2,
-        topY: customerRowY + 18,   // 顔の少し下からレーン開始
+        topY: customerRowY + 18,
         bottomY: basketY - 12,
         basket: {
           x: x + 8,
@@ -190,13 +185,16 @@
           cx: x + laneW/2,
           cy: basketY + basketH*0.48
         },
-        targetY: customerRowY + 4, // 提供アニメの到達点（顔付近）
+        // 客の顔中心（着弾位置は少し下げる）
+        customerFaceX: x + laneW/2,
+        customerFaceY: customerRowY,
+        targetX: x + laneW/2,
+        targetY: customerRowY + 14
       });
     }
 
-    // 右中段の排出口（ラフの「めん出る」位置）
     const spout = {
-      x: playX + playW + 8,      // プレイ空間の右端付近
+      x: playX + playW + 8,
       y: playY + playH * 0.54,
       w: 54,
       h: 16
@@ -216,14 +214,13 @@
     };
   }
 
-  // ========= 初期化 =========
   function rnd(a,b){ return a + Math.random()*(b-a); }
   function clamp(v,a,b){ return Math.max(a, Math.min(b,v)); }
   function d2(ax,ay,bx,by){ const dx=ax-bx, dy=ay-by; return dx*dx+dy*dy; }
 
   function randomCustomer() {
     const idx = Math.floor(Math.random()*CUSTOMER_ICONS.length);
-    return { icon: CUSTOMER_ICONS[idx], name: CUSTOMER_NAMES[idx] };
+    return { icon: CUSTOMER_ICONS[idx], name: CUSTOMER_NAMES[idx], mood:'normal' };
   }
 
   function newOrder() {
@@ -238,11 +235,20 @@
 
   function initLanes() {
     lanes = [];
+    laneToasts = [];
     for (let i=0;i<LANE_COUNT;i++){
       lanes.push({
         order: newOrder(),
-        noodlesInBasket: [], // { cook, x, y, r }
-        auto: { enabled:false, timeLeft:0, usesLeft:0 }
+        noodlesInBasket: [],
+        auto: { enabled:false, timeLeft:0, usesLeft:0 },
+        reaction: { text:'', timer:0, kind:'none' } // 顔の上のリアクション
+      });
+      laneToasts.push({
+        timer:0,
+        kind:'none',   // just / ok / miss / nobi
+        req:'',
+        got:'',
+        text:''
       });
     }
   }
@@ -257,6 +263,7 @@
     spawnTimer = rnd(NOODLE_SPAWN_MIN, NOODLE_SPAWN_MAX);
     activeNoodle = null;
     flying = [];
+    impacts = [];
     initLanes();
     setPhrase('次！', 700);
     log('リセットしました');
@@ -269,9 +276,7 @@
     ui.combo.textContent = String(combo);
   }
 
-  function log(msg) {
-    ui.log.textContent = 'ログ：' + msg;
-  }
+  function log(msg) { ui.log.textContent = 'ログ：' + msg; }
 
   function setPhrase(text, ms=900) {
     ui.phrase.textContent = text;
@@ -285,7 +290,33 @@
     return { key:h.key, ok:true, just, color:h.color };
   }
 
-  // ========= 入力 =========
+  function setLaneToast(laneIndex, kind, req, got, text) {
+    laneToasts[laneIndex] = {
+      timer: 1.1,
+      kind, req, got, text
+    };
+  }
+
+  function setLaneReaction(laneIndex, kind) {
+    const lane = lanes[laneIndex];
+    let text = '';
+    if (kind === 'just') text = '◎';
+    else if (kind === 'ok') text = '○';
+    else if (kind === 'miss') text = '×';
+    else if (kind === 'nobi') text = '!!';
+    lane.reaction = { text, timer: 0.7, kind };
+  }
+
+  function addImpact(x, y, kind) {
+    impacts.push({
+      x, y,
+      r: 8,
+      life: 0.35,
+      maxLife: 0.35,
+      kind
+    });
+  }
+
   function canvasPoint(e){
     const r = canvas.getBoundingClientRect();
     return {
@@ -303,7 +334,6 @@
 
     const geo = getLayout();
 
-    // 1) てぼ内麺タップで提供
     for (let i=0;i<LANE_COUNT;i++){
       const arr = lanes[i].noodlesInBasket;
       for (let j=arr.length-1;j>=0;j--){
@@ -315,7 +345,6 @@
       }
     }
 
-    // 2) 排出麺を掴む
     if (activeNoodle && d2(p.x,p.y,activeNoodle.x,activeNoodle.y) <= activeNoodle.r*activeNoodle.r) {
       activeNoodle.dragging = true;
       return;
@@ -343,7 +372,6 @@
       activeNoodle.dragging = false;
       const geo = getLayout();
 
-      // どのてぼに入ったか判定
       for (let i=0;i<LANE_COUNT;i++){
         const b = geo.lanesGeo[i].basket;
         if (p.x >= b.x && p.x <= b.x+b.w && p.y >= b.y && p.y <= b.y+b.h){
@@ -362,9 +390,7 @@
     }
   });
 
-  // ========= ゲーム処理 =========
   function spawnNoodle(geo){
-    // ラフに合わせて右中段排出口から出す
     activeNoodle = {
       x: geo.spout.x + geo.spout.w * 0.5,
       y: geo.spout.y + geo.spout.h * 0.5,
@@ -393,6 +419,23 @@
     lanes[laneIndex].order = newOrder();
   }
 
+  function queueFlyingNoodle(sx, sy, tx, ty, laneIndex, outcome){
+    const dx = tx - sx;
+    const dy = ty - sy;
+    const len = Math.max(1, Math.hypot(dx,dy));
+    const speed = 760;
+
+    flying.push({
+      x: sx, y: sy, r: 10,
+      vx: dx/len*speed,
+      vy: dy/len*speed,
+      tx, ty,
+      laneIndex,
+      outcome,      // 着弾時に表示したい判定結果
+      arrived: false
+    });
+  }
+
   function fireNoodleFromBasket(laneIndex, noodleIndex, geo){
     const lane = lanes[laneIndex];
     const n = lane.noodlesInBasket.splice(noodleIndex, 1)[0];
@@ -400,43 +443,72 @@
     const order = lane.order;
     const laneGeo = geo.lanesGeo[laneIndex];
 
-    // 飛行アニメ（顔位置へ）
-    const tx = laneGeo.centerX;
-    const ty = laneGeo.targetY;
-    const dx = tx - n.x;
-    const dy = ty - n.y;
-    const len = Math.max(1, Math.hypot(dx,dy));
-    const speed = 700;
-
-    flying.push({
-      x:n.x, y:n.y, r:10,
-      vx: dx/len*speed,
-      vy: dy/len*speed,
-      ttl: 0.45
-    });
+    // 先に結果を確定（着弾時に演出で使う）
+    let outcome = {
+      kind: 'miss', // just / ok / miss / nobi
+      req: order.target,
+      got: h.key,
+      scoreDelta: 0
+    };
 
     if (!h.ok){
+      outcome.kind = 'nobi';
+      outcome.scoreDelta = -15;
+    } else if (h.key === order.target) {
+      if (h.just) {
+        outcome.kind = 'just';
+        outcome.scoreDelta = +20 * combo;
+      } else {
+        outcome.kind = 'ok';
+        outcome.scoreDelta = +10 * combo;
+      }
+    } else {
+      outcome.kind = 'miss';
+      outcome.scoreDelta = -10;
+    }
+
+    // まず「飛ばす」→ 到達したら演出と判定反映（見える化）
+    queueFlyingNoodle(n.x, n.y, laneGeo.targetX, laneGeo.targetY, laneIndex, outcome);
+  }
+
+  function applyOutcomeAtArrival(laneIndex, outcome){
+    const lane = lanes[laneIndex];
+    const order = lane.order;
+
+    if (outcome.kind === 'nobi'){
       log(`のび（てぼ${laneIndex+1}）`);
       setPhrase('焦ると“のび”る', 1200);
       penalty(15);
       order.patience = Math.max(0, order.patience - 1.5);
+      setLaneReaction(laneIndex, 'nobi');
+      setLaneToast(laneIndex, 'nobi', outcome.req, outcome.got, `のび (${outcome.got})`);
       return;
     }
 
-    if (h.key === order.target){
-      if (h.just){
-        log(`ジャスト成功（てぼ${laneIndex+1}）`);
-        award(20, true);
-      } else {
-        log(`成功（てぼ${laneIndex+1}）`);
-        award(10, false);
-      }
+    if (outcome.kind === 'just'){
+      log(`ジャスト成功（てぼ${laneIndex+1}）`);
+      award(20, true);
+      setLaneReaction(laneIndex, 'just');
+      setLaneToast(laneIndex, 'just', outcome.req, outcome.got, `JUST! ${outcome.got}`);
       nextOrder(laneIndex);
-    } else {
-      log(`硬さミス（${h.key}→${order.target}）`);
-      penalty(10);
-      order.patience = Math.max(0, order.patience - 2.0);
+      return;
     }
+
+    if (outcome.kind === 'ok'){
+      log(`成功（てぼ${laneIndex+1}）`);
+      award(10, false);
+      setLaneReaction(laneIndex, 'ok');
+      setLaneToast(laneIndex, 'ok', outcome.req, outcome.got, `OK ${outcome.got}`);
+      nextOrder(laneIndex);
+      return;
+    }
+
+    // miss
+    log(`硬さミス（${outcome.got}→${outcome.req}）`);
+    penalty(10);
+    order.patience = Math.max(0, order.patience - 2.0);
+    setLaneReaction(laneIndex, 'miss');
+    setLaneToast(laneIndex, 'miss', outcome.req, outcome.got, `MISS ${outcome.got}`);
   }
 
   function update(dt){
@@ -452,14 +524,12 @@
     }
     syncHud();
 
-    // 麺排出
     spawnTimer -= dt;
     if (timeLeft > 0 && spawnTimer <= 0){
       if (!activeNoodle) spawnNoodle(geo);
       spawnTimer = rnd(NOODLE_SPAWN_MIN, NOODLE_SPAWN_MAX);
     }
 
-    // 未ドラッグ麺の微移動（排出口周辺）
     if (activeNoodle && !activeNoodle.dragging){
       activeNoodle.x += activeNoodle.vx * dt;
       activeNoodle.x = clamp(activeNoodle.x, geo.spout.x - 80, geo.spout.x + 40);
@@ -467,12 +537,10 @@
       activeNoodle.y = clamp(activeNoodle.y, geo.spout.y - 20, geo.spout.y + 20);
     }
 
-    // 各レーン更新
     for (let i=0;i<LANE_COUNT;i++){
       const lane = lanes[i];
       const b = geo.lanesGeo[i].basket;
 
-      // 待ち時間
       if (timeLeft > 0){
         lane.order.patience = Math.max(0, lane.order.patience - dt);
         if (lane.order.patience === 0){
@@ -482,15 +550,12 @@
         }
       }
 
-      // 茹で進行
       for (const n of lane.noodlesInBasket){
         n.cook += dt;
-        // 軽い揺れ（固定位置感を弱める）
         n.x = clamp(n.x + Math.sin((t+n.cook)*2.0) * 2.0 * dt, b.x+12, b.x+b.w-12);
         n.y = clamp(n.y + Math.cos((t+n.cook)*1.7) * 2.0 * dt, b.y+20, b.y+b.h-20);
       }
 
-      // アルバイト（仮）
       if (lane.auto.enabled && timeLeft > 0){
         lane.auto.timeLeft = Math.max(0, lane.auto.timeLeft - dt);
         if (lane.auto.timeLeft <= 0) lane.auto.enabled = false;
@@ -506,40 +571,74 @@
           }
         }
       }
+
+      // 客リアクション表示タイマー
+      if (lane.reaction.timer > 0) {
+        lane.reaction.timer = Math.max(0, lane.reaction.timer - dt);
+      }
+
+      // レーン判定トースト
+      if (laneToasts[i].timer > 0) {
+        laneToasts[i].timer = Math.max(0, laneToasts[i].timer - dt);
+      }
     }
 
-    // 飛行麺
+    // 飛行麺（客へ届く処理）
     for (let i=flying.length-1;i>=0;i--){
       const f = flying[i];
-      f.x += f.vx * dt;
-      f.y += f.vy * dt;
-      f.ttl -= dt;
-      if (f.ttl <= 0) flying.splice(i,1);
+      if (!f.arrived) {
+        const stepX = f.vx * dt;
+        const stepY = f.vy * dt;
+        f.x += stepX;
+        f.y += stepY;
+
+        // ターゲット到達判定
+        const remain2 = d2(f.x, f.y, f.tx, f.ty);
+        if (remain2 <= 14*14) {
+          f.arrived = true;
+
+          // 着弾エフェクト
+          addImpact(f.tx, f.ty, f.outcome.kind);
+
+          // 判定反映（見える化）
+          applyOutcomeAtArrival(f.laneIndex, f.outcome);
+
+          flying.splice(i,1);
+          continue;
+        }
+      }
+    }
+
+    // 着弾エフェクト更新
+    for (let i=impacts.length-1;i>=0;i--){
+      const im = impacts[i];
+      im.life -= dt;
+      im.r += 90 * dt;
+      if (im.life <= 0) impacts.splice(i,1);
     }
   }
 
-  // ========= 描画 =========
   function draw(){
     const geo = getLayout();
     const { W,H, playX, playY, playW, playH, lanesGeo, customerRowY, headerLineY, legend, spout } = geo;
 
     ctx.clearRect(0,0,W,H);
 
-    // 外枠（ラフの大きな枠）
+    // 外枠
     ctx.strokeStyle = '#3a3a3a';
     ctx.lineWidth = 2;
     roundRectStroke(ctx, 6, 6, W-12, H-12, 10);
 
-    // プレイエリア枠
+    // プレイエリア
     ctx.strokeStyle = '#2a2a2a';
     ctx.lineWidth = 1.5;
     roundRectStroke(ctx, playX, playY, playW, playH, 8);
 
-    // 右凡例エリア枠
+    // 右凡例
     ctx.strokeStyle = '#2a2a2a';
     roundRectStroke(ctx, legend.x, playY, legend.w, playH, 8);
 
-    // 上段の横ライン（指示/客の下あたり）
+    // 横ガイド
     ctx.strokeStyle = '#242424';
     ctx.setLineDash([4,6]);
     ctx.beginPath();
@@ -548,7 +647,7 @@
     ctx.stroke();
     ctx.setLineDash([]);
 
-    // 縦レーン点線（ラフの縦ガイド）
+    // 縦レーン
     for (const lg of lanesGeo){
       ctx.strokeStyle = '#262626';
       ctx.setLineDash([6,10]);
@@ -559,17 +658,21 @@
       ctx.setLineDash([]);
     }
 
-    // 指示文字（上段）
+    // 上段：指示文字（現在注文）
     for (let i=0;i<LANE_COUNT;i++){
       const lg = lanesGeo[i];
       const order = lanes[i].order;
+
       ctx.fillStyle = '#ddd';
       ctx.font = '20px sans-serif';
       ctx.textAlign = 'center';
       ctx.fillText(order.target, lg.centerX, headerLineY);
+
+      // 判定トースト（注文の近くに表示）
+      drawLaneToast(i, lg, headerLineY);
     }
 
-    // 客アイコン（その下の行）
+    // 客アイコンとリアクション
     for (let i=0;i<LANE_COUNT;i++){
       const lg = lanesGeo[i];
       const order = lanes[i].order;
@@ -579,22 +682,25 @@
       ctx.strokeStyle = '#666';
       ctx.lineWidth = 2;
       ctx.beginPath();
-      ctx.arc(lg.centerX, customerRowY, 24, 0, Math.PI*2);
+      ctx.arc(lg.customerFaceX, lg.customerFaceY, 24, 0, Math.PI*2);
       ctx.fill();
       ctx.stroke();
 
-      // 顔（絵文字）
+      // 顔
       ctx.font = '20px sans-serif';
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
       ctx.fillStyle = '#f2f2f2';
-      ctx.fillText(order.customer.icon, lg.centerX, customerRowY+1);
+      ctx.fillText(order.customer.icon, lg.customerFaceX, lg.customerFaceY+1);
       ctx.textBaseline = 'alphabetic';
 
-      // 小さい待ち時間
+      // 待ち時間
       ctx.fillStyle = '#999';
       ctx.font = '11px sans-serif';
-      ctx.fillText(`${order.patience.toFixed(1)}s`, lg.centerX, customerRowY + 42);
+      ctx.fillText(`${order.patience.toFixed(1)}s`, lg.centerX, lg.customerFaceY + 42);
+
+      // リアクション（◎/○/×/!!）
+      drawCustomerReaction(i, lg);
     }
 
     // てぼ（下段）
@@ -612,7 +718,6 @@
       ctx.textAlign = 'center';
       ctx.fillText(`てぼ ${i+1}`, b.cx, b.y + 22);
 
-      // てぼ内の麺
       for (const n of lanes[i].noodlesInBasket){
         const h = hardnessByTime(n.cook);
         ctx.fillStyle = h.color;
@@ -632,7 +737,7 @@
       }
     }
 
-    // 排出口（右中段）
+    // 排出口
     ctx.fillStyle = '#2d2d2d';
     ctx.strokeStyle = '#777';
     ctx.lineWidth = 1.5;
@@ -655,18 +760,37 @@
       ctx.stroke();
     }
 
-    // 飛行麺（中央を飛び交う）
+    // 飛行麺（客へ届く）
     for (const f of flying){
+      // 軌道線を薄く描くと「届いてる感」が増す
+      ctx.save();
+      ctx.globalAlpha = 0.18;
+      ctx.strokeStyle = outcomeColor(f.outcome.kind);
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(f.x - f.vx*0.03, f.y - f.vy*0.03);
+      ctx.lineTo(f.x, f.y);
+      ctx.stroke();
+      ctx.restore();
+
       ctx.fillStyle = '#fff';
       ctx.beginPath();
       ctx.arc(f.x, f.y, f.r, 0, Math.PI*2);
       ctx.fill();
+
+      // 色の縁（届いた麺の硬さ種別を視覚補助）
+      ctx.strokeStyle = outcomeColor(f.outcome.kind);
+      ctx.lineWidth = 2;
+      ctx.stroke();
     }
 
-    // 右側：硬さ色凡例（ラフ右欄）
+    // 着弾エフェクト（客に届いた瞬間）
+    drawImpacts();
+
+    // 凡例
     drawLegend(legend);
 
-    // ゲーム終了
+    // 終了
     if (timeLeft <= 0){
       ctx.fillStyle = 'rgba(0,0,0,0.55)';
       ctx.fillRect(0,0,W,H);
@@ -679,10 +803,96 @@
     }
   }
 
+  function outcomeColor(kind){
+    if (kind === 'just') return '#ffe17a';
+    if (kind === 'ok') return '#7dd3fc';
+    if (kind === 'miss') return '#ff8b8b';
+    if (kind === 'nobi') return '#ff6262';
+    return '#ccc';
+  }
+
+  function drawCustomerReaction(i, lg){
+    const r = lanes[i].reaction;
+    if (!r || r.timer <= 0) return;
+
+    const p = r.timer / 0.7;
+    const alpha = clamp(p, 0, 1);
+    const y = lg.customerFaceY - 34 - (1-p) * 8;
+
+    ctx.save();
+    ctx.globalAlpha = alpha;
+
+    // 背景吹き出しっぽく
+    ctx.fillStyle = 'rgba(0,0,0,0.55)';
+    roundRectFill(ctx, lg.customerFaceX - 18, y - 18, 36, 22, 6);
+
+    ctx.fillStyle = outcomeColor(r.kind);
+    ctx.font = '18px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText(r.text, lg.customerFaceX, y - 2);
+
+    ctx.restore();
+  }
+
+  function drawLaneToast(i, lg, headerLineY){
+    const toast = laneToasts[i];
+    if (!toast || toast.timer <= 0) return;
+
+    const p = toast.timer / 1.1;
+    const alpha = clamp(Math.min(1, p * 1.4), 0, 1);
+
+    const boxW = 104;
+    const boxH = 34;
+    const x = lg.centerX - boxW/2;
+    const y = headerLineY + 10 - (1-p) * 6;
+
+    ctx.save();
+    ctx.globalAlpha = alpha;
+
+    ctx.fillStyle = 'rgba(12,12,12,0.85)';
+    ctx.strokeStyle = outcomeColor(toast.kind);
+    ctx.lineWidth = 2;
+    roundRectFillStroke(ctx, x, y, boxW, boxH, 8);
+
+    ctx.fillStyle = outcomeColor(toast.kind);
+    ctx.font = '11px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText(toast.text, lg.centerX, y + 14);
+
+    ctx.fillStyle = '#ddd';
+    ctx.font = '10px sans-serif';
+    ctx.fillText(`注文:${toast.req} / 届:${toast.got}`, lg.centerX, y + 28);
+
+    ctx.restore();
+  }
+
+  function drawImpacts(){
+    for (const im of impacts){
+      const a = clamp(im.life / im.maxLife, 0, 1);
+      const col = outcomeColor(im.kind);
+
+      // リング
+      ctx.save();
+      ctx.globalAlpha = a * 0.9;
+      ctx.strokeStyle = col;
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      ctx.arc(im.x, im.y, im.r, 0, Math.PI*2);
+      ctx.stroke();
+
+      // 小さな着弾点
+      ctx.globalAlpha = a * 0.5;
+      ctx.fillStyle = col;
+      ctx.beginPath();
+      ctx.arc(im.x, im.y, 4, 0, Math.PI*2);
+      ctx.fill();
+      ctx.restore();
+    }
+  }
+
   function drawLegend(legend){
     const x = legend.x + 10;
     const y = legend.y + 14;
-    const w = legend.w - 20;
 
     ctx.fillStyle = '#ddd';
     ctx.font = '16px sans-serif';
@@ -713,9 +923,11 @@
     ctx.fillStyle = '#aaa';
     ctx.font = '12px sans-serif';
     ctx.fillText('白い輪 = ジャスト', x, cy);
+
+    cy += 20;
+    ctx.fillText('◎/○/× = 判定', x, cy);
   }
 
-  // ========= 図形ヘルパー =========
   function roundRectStroke(ctx, x, y, w, h, r){
     ctx.beginPath();
     ctx.moveTo(x+r, y);
@@ -726,7 +938,7 @@
     ctx.closePath();
     ctx.stroke();
   }
-  function roundRectFillStroke(ctx, x, y, w, h, r){
+  function roundRectFill(ctx, x, y, w, h, r){
     ctx.beginPath();
     ctx.moveTo(x+r, y);
     ctx.arcTo(x+w, y, x+w, y+h, r);
@@ -735,10 +947,12 @@
     ctx.arcTo(x, y, x+w, y, r);
     ctx.closePath();
     ctx.fill();
+  }
+  function roundRectFillStroke(ctx, x, y, w, h, r){
+    roundRectFill(ctx, x, y, w, h, r);
     ctx.stroke();
   }
 
-  // ========= ループ =========
   function frame(now){
     const dt = Math.min(0.033, (now - last) / 1000);
     last = now;
@@ -750,18 +964,14 @@
     requestAnimationFrame(frame);
   }
 
-  // ========= ボタン =========
   ui.resetBtn.addEventListener('click', () => resetGame());
-
   ui.adBtn.addEventListener('click', () => {
-    // 仮：てぼ1を補助
     lanes[0].auto.enabled = true;
     lanes[0].auto.timeLeft = 12;
     lanes[0].auto.usesLeft = 6;
     log('アルバイト（仮）：てぼ1を補助');
   });
 
-  // ========= 開始 =========
   resetGame();
   requestAnimationFrame(frame);
 })();
