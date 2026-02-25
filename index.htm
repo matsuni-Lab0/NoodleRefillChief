@@ -2,82 +2,17 @@
 <html lang="ja">
 <head>
   <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no" />
-  <title>Tebo Shop Prototype - Visual Feedback Improved</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,maximum-scale=1,user-scalable=no" />
+  <title>Tebo Shop Prototype v2 - QoL + Tension</title>
   <style>
-    html, body {
-      margin: 0;
-      padding: 0;
-      background: #111;
-      color: #eee;
-      font-family: system-ui, -apple-system, "Segoe UI", Roboto, "Noto Sans JP", sans-serif;
-    }
-    #app {
-      min-height: 100vh;
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      padding: 10px;
-      box-sizing: border-box;
-      gap: 8px;
-    }
-    #topbar {
-      width: min(980px, 96vw);
-      display: flex;
-      gap: 10px;
-      flex-wrap: wrap;
-      justify-content: space-between;
-      align-items: center;
-    }
-    .pill {
-      background: #1c1c1c;
-      border: 1px solid #333;
-      border-radius: 999px;
-      padding: 6px 10px;
-      font-size: 14px;
-      white-space: nowrap;
-    }
-    #boardWrap {
-      width: min(980px, 96vw);
-      display: flex;
-      justify-content: center;
-    }
-    canvas {
-      width: 100%;
-      height: auto;
-      max-width: 980px;
-      background: #0e0e0e;
-      border: 1px solid #2a2a2a;
-      border-radius: 12px;
-      touch-action: none;
-      display: block;
-    }
-    #footer {
-      width: min(980px, 96vw);
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      gap: 8px;
-      flex-wrap: wrap;
-    }
-    button {
-      background: #222;
-      color: #eee;
-      border: 1px solid #3a3a3a;
-      border-radius: 10px;
-      padding: 8px 12px;
-      cursor: pointer;
-    }
-    #log {
-      color: #aaa;
-      font-size: 12px;
-      flex: 1;
-      min-width: 220px;
-      overflow: hidden;
-      text-overflow: ellipsis;
-      white-space: nowrap;
-      text-align: center;
-    }
+    html,body{margin:0;padding:0;background:#111;color:#eee;font-family:system-ui,-apple-system,"Segoe UI",Roboto,"Noto Sans JP",sans-serif}
+    #app{min-height:100vh;display:flex;flex-direction:column;align-items:center;padding:10px;box-sizing:border-box;gap:8px}
+    #topbar,#footer{width:min(980px,96vw);display:flex;gap:10px;flex-wrap:wrap;justify-content:space-between;align-items:center}
+    .pill{background:#1c1c1c;border:1px solid #333;border-radius:999px;padding:6px 10px;font-size:14px;white-space:nowrap}
+    #boardWrap{width:min(980px,96vw);display:flex;justify-content:center}
+    canvas{width:100%;height:auto;max-width:980px;background:#0e0e0e;border:1px solid #2a2a2a;border-radius:12px;touch-action:none;display:block}
+    button{background:#222;color:#eee;border:1px solid #3a3a3a;border-radius:10px;padding:8px 12px;cursor:pointer}
+    #log{color:#aaa;font-size:12px;flex:1;min-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;text-align:center}
   </style>
 </head>
 <body>
@@ -86,13 +21,12 @@
     <div class="pill">残り <span id="timeLeft">45.0</span>s</div>
     <div class="pill">スコア <span id="score">0</span></div>
     <div class="pill">コンボ ×<span id="combo">1</span></div>
+    <div class="pill" id="phasePill">通常</div>
     <div class="pill" id="phrase">次！</div>
   </div>
-
   <div id="boardWrap">
     <canvas id="game" width="980" height="720"></canvas>
   </div>
-
   <div id="footer">
     <button id="adBtn">アルバイト召喚（仮）</button>
     <div id="log">ログ：—</div>
@@ -109,17 +43,26 @@
     timeLeft: document.getElementById('timeLeft'),
     score: document.getElementById('score'),
     combo: document.getElementById('combo'),
+    phasePill: document.getElementById('phasePill'),
     phrase: document.getElementById('phrase'),
     log: document.getElementById('log'),
     resetBtn: document.getElementById('resetBtn'),
-    adBtn: document.getElementById('adBtn'),
+    adBtn: document.getElementById('adBtn')
   };
 
   const GAME_TIME = 45;
   const LANE_COUNT = 4;
-  const NOODLE_SPAWN_MIN = 0.75;
-  const NOODLE_SPAWN_MAX = 1.15;
   const OVERCOOK = 3.6;
+
+  // 基本湧き間隔（終盤で短縮）
+  const SPAWN_NORMAL = [0.75, 1.15];
+  const SPAWN_RUSH   = [0.45, 0.80];
+
+  // QoL（受け取り改善）
+  const ACTIVE_CATCH_RADIUS_BONUS = 16;   // 麺の直接タッチ判定拡大
+  const SPOUT_CATCH_RADIUS = 54;          // 排出口付近なら麺をつかみやすくする
+  const BASKET_SNAP_MARGIN = 28;          // てぼ近傍で吸着判定（矩形外でもOK）
+  const MISSED_NOODLE_GRACE = 0.55;       // 取り逃し猶予
 
   const HARDNESS_TABLE = [
     { key:'かた',   a:0.0, b:1.2, justA:0.4, justB:0.8, color:'#d6b85c' },
@@ -138,23 +81,35 @@
   let combo = 1;
   let comboStreak = 0;
   let phraseTimer = 0;
-  let spawnTimer = rnd(NOODLE_SPAWN_MIN, NOODLE_SPAWN_MAX);
+  let spawnTimer = 0;
 
   let lanes = [];
   let activeNoodle = null;
-  let flying = [];        // 飛行中の麺（客まで届く）
-  let impacts = [];       // 客に届いた瞬間のエフェクト
-  let laneToasts = [];    // 各レーン判定表示
+  let flying = [];
+  let impacts = [];
+  let laneToasts = [];
   let pointer = { down:false, id:null, x:0, y:0 };
 
-  function getLayout() {
-    const W = canvas.width;
-    const H = canvas.height;
+  function rnd(a,b){ return a + Math.random()*(b-a); }
+  function clamp(v,a,b){ return Math.max(a, Math.min(b,v)); }
+  function d2(ax,ay,bx,by){ const dx=ax-bx, dy=ay-by; return dx*dx+dy*dy; }
 
-    const legendW = 150;
-    const boardPad = 18;
-    const playX = boardPad;
-    const playY = boardPad;
+  function currentSpawnRange() {
+    return timeLeft <= 15 ? SPAWN_RUSH : SPAWN_NORMAL;
+  }
+  function currentRushMultiplier() {
+    return timeLeft <= 15 ? 1.18 : 1.0; // 客の待ち減少を少しだけ速く
+  }
+
+  function nextSpawnDelay() {
+    const r = currentSpawnRange();
+    return rnd(r[0], r[1]);
+  }
+
+  function getLayout() {
+    const W = canvas.width, H = canvas.height;
+    const legendW = 150, boardPad = 18;
+    const playX = boardPad, playY = boardPad;
     const playW = W - legendW - boardPad*2;
     const playH = H - boardPad*2;
 
@@ -163,7 +118,6 @@
 
     const basketH = 110;
     const basketY = playY + playH - basketH - 6;
-
     const laneGap = 14;
     const laneW = (playW - laneGap*(LANE_COUNT-1)) / LANE_COUNT;
 
@@ -171,52 +125,22 @@
     for (let i=0;i<LANE_COUNT;i++){
       const x = playX + i*(laneW + laneGap);
       lanesGeo.push({
-        i,
-        x,
-        w: laneW,
-        centerX: x + laneW/2,
-        topY: customerRowY + 18,
-        bottomY: basketY - 12,
+        i, x, w: laneW, centerX: x + laneW/2,
+        topY: customerRowY + 18, bottomY: basketY - 12,
         basket: {
-          x: x + 8,
-          y: basketY,
-          w: laneW - 16,
-          h: basketH,
-          cx: x + laneW/2,
-          cy: basketY + basketH*0.48
+          x: x + 8, y: basketY, w: laneW - 16, h: basketH,
+          cx: x + laneW/2, cy: basketY + basketH*0.48
         },
-        // 客の顔中心（着弾位置は少し下げる）
-        customerFaceX: x + laneW/2,
-        customerFaceY: customerRowY,
-        targetX: x + laneW/2,
-        targetY: customerRowY + 14
+        customerFaceX: x + laneW/2, customerFaceY: customerRowY,
+        targetX: x + laneW/2, targetY: customerRowY + 14
       });
     }
 
-    const spout = {
-      x: playX + playW + 8,
-      y: playY + playH * 0.54,
-      w: 54,
-      h: 16
-    };
+    const spout = { x: playX + playW + 8, y: playY + playH * 0.54, w: 54, h: 16 };
+    const legend = { x: W - legendW - boardPad, y: playY + 10, w: legendW, h: 150 };
 
-    const legend = {
-      x: W - legendW - boardPad,
-      y: playY + 10,
-      w: legendW,
-      h: 150
-    };
-
-    return {
-      W,H, boardPad, playX, playY, playW, playH,
-      headerLineY, customerRowY, basketY,
-      lanesGeo, spout, legend
-    };
+    return {W,H,boardPad,playX,playY,playW,playH,headerLineY,customerRowY,basketY,lanesGeo,spout,legend};
   }
-
-  function rnd(a,b){ return a + Math.random()*(b-a); }
-  function clamp(v,a,b){ return Math.max(a, Math.min(b,v)); }
-  function d2(ax,ay,bx,by){ const dx=ax-bx, dy=ay-by; return dx*dx+dy*dy; }
 
   function randomCustomer() {
     const idx = Math.floor(Math.random()*CUSTOMER_ICONS.length);
@@ -225,12 +149,7 @@
 
   function newOrder() {
     const hard = HARDNESS_TABLE[Math.floor(Math.random()*HARDNESS_TABLE.length)];
-    return {
-      target: hard.key,
-      patience: rnd(7, 11),
-      customer: randomCustomer(),
-      special: '通常'
-    };
+    return { target: hard.key, patience: rnd(7, 11), patienceMax: 11, customer: randomCustomer(), special: '通常' };
   }
 
   function initLanes() {
@@ -241,47 +160,27 @@
         order: newOrder(),
         noodlesInBasket: [],
         auto: { enabled:false, timeLeft:0, usesLeft:0 },
-        reaction: { text:'', timer:0, kind:'none' } // 顔の上のリアクション
+        reaction: { text:'', timer:0, kind:'none' }
       });
-      laneToasts.push({
-        timer:0,
-        kind:'none',   // just / ok / miss / nobi
-        req:'',
-        got:'',
-        text:''
-      });
+      laneToasts.push({ timer:0, kind:'none', req:'', got:'', text:'' });
     }
   }
 
   function resetGame() {
-    t = 0;
-    timeLeft = GAME_TIME;
-    score = 0;
-    combo = 1;
-    comboStreak = 0;
-    phraseTimer = 0;
-    spawnTimer = rnd(NOODLE_SPAWN_MIN, NOODLE_SPAWN_MAX);
-    activeNoodle = null;
-    flying = [];
-    impacts = [];
-    initLanes();
-    setPhrase('次！', 700);
-    log('リセットしました');
-    syncHud();
+    t=0; timeLeft=GAME_TIME; score=0; combo=1; comboStreak=0;
+    phraseTimer=0; spawnTimer=nextSpawnDelay();
+    activeNoodle = null; flying=[]; impacts=[]; initLanes();
+    setPhrase('次！',700); log('リセットしました'); syncHud();
   }
 
   function syncHud() {
     ui.timeLeft.textContent = timeLeft.toFixed(1);
     ui.score.textContent = String(score);
     ui.combo.textContent = String(combo);
+    ui.phasePill.textContent = timeLeft <= 15 ? '終盤ラッシュ' : '通常';
   }
-
-  function log(msg) { ui.log.textContent = 'ログ：' + msg; }
-
-  function setPhrase(text, ms=900) {
-    ui.phrase.textContent = text;
-    phraseTimer = ms/1000;
-  }
+  function log(msg){ ui.log.textContent = 'ログ：' + msg; }
+  function setPhrase(text, ms=900){ ui.phrase.textContent=text; phraseTimer = ms/1000; }
 
   function hardnessByTime(sec) {
     if (sec >= OVERCOOK) return { key:'のび', ok:false, just:false, color:COLOR_NOBI };
@@ -291,49 +190,54 @@
   }
 
   function setLaneToast(laneIndex, kind, req, got, text) {
-    laneToasts[laneIndex] = {
-      timer: 1.1,
-      kind, req, got, text
-    };
+    laneToasts[laneIndex] = { timer:1.1, kind, req, got, text };
   }
 
   function setLaneReaction(laneIndex, kind) {
-    const lane = lanes[laneIndex];
     let text = '';
-    if (kind === 'just') text = '◎';
-    else if (kind === 'ok') text = '○';
-    else if (kind === 'miss') text = '×';
-    else if (kind === 'nobi') text = '!!';
-    lane.reaction = { text, timer: 0.7, kind };
+    if (kind==='just') text='◎';
+    else if (kind==='ok') text='○';
+    else if (kind==='miss') text='×';
+    else if (kind==='nobi') text='!!';
+    lanes[laneIndex].reaction = { text, timer:0.7, kind };
   }
 
-  function addImpact(x, y, kind) {
-    impacts.push({
-      x, y,
-      r: 8,
-      life: 0.35,
-      maxLife: 0.35,
-      kind
-    });
+  function addImpact(x,y,kind){
+    impacts.push({ x,y,r:8,life:0.35,maxLife:0.35,kind });
   }
 
   function canvasPoint(e){
     const r = canvas.getBoundingClientRect();
-    return {
-      x: (e.clientX - r.left) * (canvas.width / r.width),
-      y: (e.clientY - r.top) * (canvas.height / r.height)
-    };
+    return { x:(e.clientX-r.left)*(canvas.width/r.width), y:(e.clientY-r.top)*(canvas.height/r.height) };
+  }
+
+  function tryCatchActiveNoodleByExpandedArea(px, py, geo) {
+    if (!activeNoodle) return false;
+    // 直接タッチ（拡大）
+    if (d2(px, py, activeNoodle.x, activeNoodle.y) <= (activeNoodle.r + ACTIVE_CATCH_RADIUS_BONUS)**2) {
+      activeNoodle.dragging = true;
+      return true;
+    }
+    // 排出口付近なら掴める（初動救済）
+    const sx = geo.spout.x + geo.spout.w*0.5;
+    const sy = geo.spout.y + geo.spout.h*0.5;
+    if (d2(px, py, sx, sy) <= SPOUT_CATCH_RADIUS*SPOUT_CATCH_RADIUS) {
+      activeNoodle.dragging = true;
+      activeNoodle.x = px;
+      activeNoodle.y = py;
+      return true;
+    }
+    return false;
   }
 
   canvas.addEventListener('pointerdown', (e) => {
     canvas.setPointerCapture(e.pointerId);
     pointer.down = true;
     pointer.id = e.pointerId;
-    const p = canvasPoint(e);
-    pointer.x = p.x; pointer.y = p.y;
-
+    const p = canvasPoint(e); pointer.x=p.x; pointer.y=p.y;
     const geo = getLayout();
 
+    // 先にてぼ内麺の発射判定
     for (let i=0;i<LANE_COUNT;i++){
       const arr = lanes[i].noodlesInBasket;
       for (let j=arr.length-1;j>=0;j--){
@@ -345,16 +249,13 @@
       }
     }
 
-    if (activeNoodle && d2(p.x,p.y,activeNoodle.x,activeNoodle.y) <= activeNoodle.r*activeNoodle.r) {
-      activeNoodle.dragging = true;
-      return;
-    }
+    // 排出麺の掴みやすさ改善
+    if (activeNoodle && tryCatchActiveNoodleByExpandedArea(p.x, p.y, geo)) return;
   });
 
   canvas.addEventListener('pointermove', (e) => {
     if (!pointer.down || e.pointerId !== pointer.id) return;
-    const p = canvasPoint(e);
-    pointer.x = p.x; pointer.y = p.y;
+    const p = canvasPoint(e); pointer.x=p.x; pointer.y=p.y;
     if (activeNoodle && activeNoodle.dragging) {
       activeNoodle.x = p.x;
       activeNoodle.y = p.y;
@@ -364,9 +265,7 @@
   canvas.addEventListener('pointerup', (e) => {
     if (e.pointerId !== pointer.id) return;
     pointer.down = false;
-
-    const p = canvasPoint(e);
-    pointer.x = p.x; pointer.y = p.y;
+    const p = canvasPoint(e); pointer.x=p.x; pointer.y=p.y;
 
     if (activeNoodle && activeNoodle.dragging){
       activeNoodle.dragging = false;
@@ -374,7 +273,9 @@
 
       for (let i=0;i<LANE_COUNT;i++){
         const b = geo.lanesGeo[i].basket;
-        if (p.x >= b.x && p.x <= b.x+b.w && p.y >= b.y && p.y <= b.y+b.h){
+        // てぼ吸着判定（少し外でも投入できる）
+        if (p.x >= b.x - BASKET_SNAP_MARGIN && p.x <= b.x+b.w + BASKET_SNAP_MARGIN &&
+            p.y >= b.y - BASKET_SNAP_MARGIN && p.y <= b.y+b.h + BASKET_SNAP_MARGIN) {
           lanes[i].noodlesInBasket.push({
             cook: 0,
             x: b.cx + rnd(-16, 16),
@@ -382,11 +283,15 @@
             r: 12
           });
           activeNoodle = null;
-          log(`てぼ${i+1}に投入`);
+          log(`てぼ${i+1}に投入（吸着）`);
           setPhrase('次！', 500);
           return;
         }
       }
+
+      // 投入失敗時も即消えない（猶予）
+      activeNoodle.missGrace = MISSED_NOODLE_GRACE;
+      log('てぼに入らず…（猶予あり）');
     }
   });
 
@@ -396,7 +301,8 @@
       y: geo.spout.y + geo.spout.h * 0.5,
       r: 15,
       dragging: false,
-      vx: -24
+      vx: -24,
+      missGrace: 0
     };
   }
 
@@ -415,25 +321,13 @@
     syncHud();
   }
 
-  function nextOrder(laneIndex){
-    lanes[laneIndex].order = newOrder();
-  }
+  function nextOrder(laneIndex){ lanes[laneIndex].order = newOrder(); }
 
-  function queueFlyingNoodle(sx, sy, tx, ty, laneIndex, outcome){
-    const dx = tx - sx;
-    const dy = ty - sy;
+  function queueFlyingNoodle(sx,sy,tx,ty,laneIndex,outcome){
+    const dx = tx-sx, dy = ty-sy;
     const len = Math.max(1, Math.hypot(dx,dy));
     const speed = 760;
-
-    flying.push({
-      x: sx, y: sy, r: 10,
-      vx: dx/len*speed,
-      vy: dy/len*speed,
-      tx, ty,
-      laneIndex,
-      outcome,      // 着弾時に表示したい判定結果
-      arrived: false
-    });
+    flying.push({ x:sx,y:sy,r:10, vx:dx/len*speed, vy:dy/len*speed, tx,ty, laneIndex, outcome, arrived:false });
   }
 
   function fireNoodleFromBasket(laneIndex, noodleIndex, geo){
@@ -443,31 +337,14 @@
     const order = lane.order;
     const laneGeo = geo.lanesGeo[laneIndex];
 
-    // 先に結果を確定（着弾時に演出で使う）
-    let outcome = {
-      kind: 'miss', // just / ok / miss / nobi
-      req: order.target,
-      got: h.key,
-      scoreDelta: 0
-    };
-
-    if (!h.ok){
-      outcome.kind = 'nobi';
-      outcome.scoreDelta = -15;
-    } else if (h.key === order.target) {
-      if (h.just) {
-        outcome.kind = 'just';
-        outcome.scoreDelta = +20 * combo;
-      } else {
-        outcome.kind = 'ok';
-        outcome.scoreDelta = +10 * combo;
-      }
+    let outcome = { kind:'miss', req:order.target, got:h.key, scoreDelta:0 };
+    if (!h.ok) { outcome.kind='nobi'; outcome.scoreDelta=-15; }
+    else if (h.key === order.target) {
+      if (h.just) { outcome.kind='just'; outcome.scoreDelta=+20*combo; }
+      else { outcome.kind='ok'; outcome.scoreDelta=+10*combo; }
     } else {
-      outcome.kind = 'miss';
-      outcome.scoreDelta = -10;
+      outcome.kind='miss'; outcome.scoreDelta=-10;
     }
-
-    // まず「飛ばす」→ 到達したら演出と判定反映（見える化）
     queueFlyingNoodle(n.x, n.y, laneGeo.targetX, laneGeo.targetY, laneIndex, outcome);
   }
 
@@ -484,7 +361,6 @@
       setLaneToast(laneIndex, 'nobi', outcome.req, outcome.got, `のび (${outcome.got})`);
       return;
     }
-
     if (outcome.kind === 'just'){
       log(`ジャスト成功（てぼ${laneIndex+1}）`);
       award(20, true);
@@ -493,7 +369,6 @@
       nextOrder(laneIndex);
       return;
     }
-
     if (outcome.kind === 'ok'){
       log(`成功（てぼ${laneIndex+1}）`);
       award(10, false);
@@ -503,7 +378,6 @@
       return;
     }
 
-    // miss
     log(`硬さミス（${outcome.got}→${outcome.req}）`);
     penalty(10);
     order.patience = Math.max(0, order.patience - 2.0);
@@ -514,27 +388,41 @@
   function update(dt){
     const geo = getLayout();
 
-    if (phraseTimer > 0){
-      phraseTimer -= dt;
-      if (phraseTimer <= 0) ui.phrase.textContent = '次！';
-    }
+    if (phraseTimer > 0){ phraseTimer -= dt; if (phraseTimer <= 0) ui.phrase.textContent = '次！'; }
 
-    if (timeLeft > 0){
-      timeLeft = Math.max(0, timeLeft - dt);
-    }
+    if (timeLeft > 0) timeLeft = Math.max(0, timeLeft - dt);
     syncHud();
+
+    // 終盤突入で一度だけ掛け声
+    if (timeLeft <= 15 && !update._rushAnnounced) {
+      update._rushAnnounced = true;
+      setPhrase('ラッシュ！', 1000);
+      log('終盤ラッシュ開始');
+    }
+    if (timeLeft > 15) update._rushAnnounced = false;
 
     spawnTimer -= dt;
     if (timeLeft > 0 && spawnTimer <= 0){
       if (!activeNoodle) spawnNoodle(geo);
-      spawnTimer = rnd(NOODLE_SPAWN_MIN, NOODLE_SPAWN_MAX);
+      spawnTimer = nextSpawnDelay();
     }
 
+    // 排出麺挙動 + 取り逃し猶予
     if (activeNoodle && !activeNoodle.dragging){
       activeNoodle.x += activeNoodle.vx * dt;
       activeNoodle.x = clamp(activeNoodle.x, geo.spout.x - 80, geo.spout.x + 40);
       activeNoodle.y += Math.sin(t * 3.2) * 8 * dt;
       activeNoodle.y = clamp(activeNoodle.y, geo.spout.y - 20, geo.spout.y + 20);
+
+      if (activeNoodle.missGrace > 0) {
+        activeNoodle.missGrace = Math.max(0, activeNoodle.missGrace - dt);
+      }
+      // 左に流れきって猶予も終了したら消える
+      if (activeNoodle.x <= geo.spout.x - 78 && activeNoodle.missGrace <= 0) {
+        log('麺を取り逃しました');
+        penalty(2);
+        activeNoodle = null;
+      }
     }
 
     for (let i=0;i<LANE_COUNT;i++){
@@ -542,7 +430,7 @@
       const b = geo.lanesGeo[i].basket;
 
       if (timeLeft > 0){
-        lane.order.patience = Math.max(0, lane.order.patience - dt);
+        lane.order.patience = Math.max(0, lane.order.patience - dt * currentRushMultiplier());
         if (lane.order.patience === 0){
           penalty(5);
           log(`レーン${i+1} 客が帰った…`);
@@ -572,44 +460,25 @@
         }
       }
 
-      // 客リアクション表示タイマー
-      if (lane.reaction.timer > 0) {
-        lane.reaction.timer = Math.max(0, lane.reaction.timer - dt);
-      }
-
-      // レーン判定トースト
-      if (laneToasts[i].timer > 0) {
-        laneToasts[i].timer = Math.max(0, laneToasts[i].timer - dt);
-      }
+      if (lane.reaction.timer > 0) lane.reaction.timer = Math.max(0, lane.reaction.timer - dt);
+      if (laneToasts[i].timer > 0) laneToasts[i].timer = Math.max(0, laneToasts[i].timer - dt);
     }
 
-    // 飛行麺（客へ届く処理）
     for (let i=flying.length-1;i>=0;i--){
       const f = flying[i];
-      if (!f.arrived) {
-        const stepX = f.vx * dt;
-        const stepY = f.vy * dt;
-        f.x += stepX;
-        f.y += stepY;
-
-        // ターゲット到達判定
-        const remain2 = d2(f.x, f.y, f.tx, f.ty);
-        if (remain2 <= 14*14) {
+      if (!f.arrived){
+        f.x += f.vx * dt;
+        f.y += f.vy * dt;
+        if (d2(f.x, f.y, f.tx, f.ty) <= 14*14){
           f.arrived = true;
-
-          // 着弾エフェクト
           addImpact(f.tx, f.ty, f.outcome.kind);
-
-          // 判定反映（見える化）
           applyOutcomeAtArrival(f.laneIndex, f.outcome);
-
           flying.splice(i,1);
           continue;
         }
       }
     }
 
-    // 着弾エフェクト更新
     for (let i=impacts.length-1;i>=0;i--){
       const im = impacts[i];
       im.life -= dt;
@@ -618,251 +487,77 @@
     }
   }
 
-  function draw(){
-    const geo = getLayout();
-    const { W,H, playX, playY, playW, playH, lanesGeo, customerRowY, headerLineY, legend, spout } = geo;
-
-    ctx.clearRect(0,0,W,H);
-
-    // 外枠
-    ctx.strokeStyle = '#3a3a3a';
-    ctx.lineWidth = 2;
-    roundRectStroke(ctx, 6, 6, W-12, H-12, 10);
-
-    // プレイエリア
-    ctx.strokeStyle = '#2a2a2a';
-    ctx.lineWidth = 1.5;
-    roundRectStroke(ctx, playX, playY, playW, playH, 8);
-
-    // 右凡例
-    ctx.strokeStyle = '#2a2a2a';
-    roundRectStroke(ctx, legend.x, playY, legend.w, playH, 8);
-
-    // 横ガイド
-    ctx.strokeStyle = '#242424';
-    ctx.setLineDash([4,6]);
-    ctx.beginPath();
-    ctx.moveTo(playX + 8, customerRowY + 28);
-    ctx.lineTo(playX + playW - 8, customerRowY + 28);
-    ctx.stroke();
-    ctx.setLineDash([]);
-
-    // 縦レーン
-    for (const lg of lanesGeo){
-      ctx.strokeStyle = '#262626';
-      ctx.setLineDash([6,10]);
-      ctx.beginPath();
-      ctx.moveTo(lg.centerX, customerRowY + 28);
-      ctx.lineTo(lg.centerX, lg.bottomY);
-      ctx.stroke();
-      ctx.setLineDash([]);
-    }
-
-    // 上段：指示文字（現在注文）
-    for (let i=0;i<LANE_COUNT;i++){
-      const lg = lanesGeo[i];
-      const order = lanes[i].order;
-
-      ctx.fillStyle = '#ddd';
-      ctx.font = '20px sans-serif';
-      ctx.textAlign = 'center';
-      ctx.fillText(order.target, lg.centerX, headerLineY);
-
-      // 判定トースト（注文の近くに表示）
-      drawLaneToast(i, lg, headerLineY);
-    }
-
-    // 客アイコンとリアクション
-    for (let i=0;i<LANE_COUNT;i++){
-      const lg = lanesGeo[i];
-      const order = lanes[i].order;
-
-      // 顔円
-      ctx.fillStyle = '#191919';
-      ctx.strokeStyle = '#666';
-      ctx.lineWidth = 2;
-      ctx.beginPath();
-      ctx.arc(lg.customerFaceX, lg.customerFaceY, 24, 0, Math.PI*2);
-      ctx.fill();
-      ctx.stroke();
-
-      // 顔
-      ctx.font = '20px sans-serif';
-      ctx.textAlign = 'center';
-      ctx.textBaseline = 'middle';
-      ctx.fillStyle = '#f2f2f2';
-      ctx.fillText(order.customer.icon, lg.customerFaceX, lg.customerFaceY+1);
-      ctx.textBaseline = 'alphabetic';
-
-      // 待ち時間
-      ctx.fillStyle = '#999';
-      ctx.font = '11px sans-serif';
-      ctx.fillText(`${order.patience.toFixed(1)}s`, lg.centerX, lg.customerFaceY + 42);
-
-      // リアクション（◎/○/×/!!）
-      drawCustomerReaction(i, lg);
-    }
-
-    // てぼ（下段）
-    for (let i=0;i<LANE_COUNT;i++){
-      const lg = lanesGeo[i];
-      const b = lg.basket;
-
-      ctx.fillStyle = '#141414';
-      ctx.strokeStyle = '#555';
-      ctx.lineWidth = 2;
-      roundRectFillStroke(ctx, b.x, b.y, b.w, b.h, 8);
-
-      ctx.fillStyle = '#d8d8d8';
-      ctx.font = '14px sans-serif';
-      ctx.textAlign = 'center';
-      ctx.fillText(`てぼ ${i+1}`, b.cx, b.y + 22);
-
-      for (const n of lanes[i].noodlesInBasket){
-        const h = hardnessByTime(n.cook);
-        ctx.fillStyle = h.color;
-        ctx.beginPath();
-        ctx.arc(n.x, n.y, n.r, 0, Math.PI*2);
-        ctx.fill();
-
-        if (h.just){
-          ctx.strokeStyle = '#fff';
-          ctx.globalAlpha = 0.35;
-          ctx.lineWidth = 3;
-          ctx.beginPath();
-          ctx.arc(n.x, n.y, n.r+3, 0, Math.PI*2);
-          ctx.stroke();
-          ctx.globalAlpha = 1;
-        }
-      }
-    }
-
-    // 排出口
-    ctx.fillStyle = '#2d2d2d';
-    ctx.strokeStyle = '#777';
-    ctx.lineWidth = 1.5;
-    ctx.fillRect(spout.x, spout.y, spout.w, spout.h);
-    ctx.strokeRect(spout.x, spout.y, spout.w, spout.h);
-
-    ctx.fillStyle = '#ddd';
-    ctx.font = '14px sans-serif';
-    ctx.textAlign = 'right';
-    ctx.fillText('めん出る', spout.x - 8, spout.y + 13);
-
-    // 排出中の麺
-    if (activeNoodle){
-      ctx.fillStyle = '#f4f4f4';
-      ctx.strokeStyle = '#333';
-      ctx.lineWidth = 2;
-      ctx.beginPath();
-      ctx.arc(activeNoodle.x, activeNoodle.y, activeNoodle.r, 0, Math.PI*2);
-      ctx.fill();
-      ctx.stroke();
-    }
-
-    // 飛行麺（客へ届く）
-    for (const f of flying){
-      // 軌道線を薄く描くと「届いてる感」が増す
-      ctx.save();
-      ctx.globalAlpha = 0.18;
-      ctx.strokeStyle = outcomeColor(f.outcome.kind);
-      ctx.lineWidth = 2;
-      ctx.beginPath();
-      ctx.moveTo(f.x - f.vx*0.03, f.y - f.vy*0.03);
-      ctx.lineTo(f.x, f.y);
-      ctx.stroke();
-      ctx.restore();
-
-      ctx.fillStyle = '#fff';
-      ctx.beginPath();
-      ctx.arc(f.x, f.y, f.r, 0, Math.PI*2);
-      ctx.fill();
-
-      // 色の縁（届いた麺の硬さ種別を視覚補助）
-      ctx.strokeStyle = outcomeColor(f.outcome.kind);
-      ctx.lineWidth = 2;
-      ctx.stroke();
-    }
-
-    // 着弾エフェクト（客に届いた瞬間）
-    drawImpacts();
-
-    // 凡例
-    drawLegend(legend);
-
-    // 終了
-    if (timeLeft <= 0){
-      ctx.fillStyle = 'rgba(0,0,0,0.55)';
-      ctx.fillRect(0,0,W,H);
-      ctx.fillStyle = '#fff';
-      ctx.font = '28px sans-serif';
-      ctx.textAlign = 'center';
-      ctx.fillText('時間終了', W/2, H/2 - 10);
-      ctx.font = '18px sans-serif';
-      ctx.fillText(`スコア ${score}`, W/2, H/2 + 24);
-    }
+  function outcomeColor(kind){
+    if (kind==='just') return '#ffe17a';
+    if (kind==='ok') return '#7dd3fc';
+    if (kind==='miss') return '#ff8b8b';
+    if (kind==='nobi') return '#ff6262';
+    return '#ccc';
   }
 
-  function outcomeColor(kind){
-    if (kind === 'just') return '#ffe17a';
-    if (kind === 'ok') return '#7dd3fc';
-    if (kind === 'miss') return '#ff8b8b';
-    if (kind === 'nobi') return '#ff6262';
-    return '#ccc';
+  function drawPatienceGauge(lg, order){
+    const ratio = clamp(order.patience / order.patienceMax, 0, 1);
+    const cx = lg.customerFaceX, cy = lg.customerFaceY, r = 30;
+    const start = -Math.PI/2;
+    const end = start + Math.PI*2*ratio;
+
+    // 背景リング
+    ctx.save();
+    ctx.lineWidth = 5;
+    ctx.strokeStyle = 'rgba(255,255,255,0.12)';
+    ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI*2); ctx.stroke();
+
+    // 色変化（緑→黄→赤）
+    let col = '#58d68d';
+    if (ratio < 0.55) col = '#f1c40f';
+    if (ratio < 0.28) col = '#ff6b6b';
+    if (ratio < 0.18 && Math.floor(t*10)%2===0) col = '#ffd1d1'; // 点滅気味
+    ctx.strokeStyle = col;
+    ctx.beginPath(); ctx.arc(cx, cy, r, start, end, false); ctx.stroke();
+    ctx.restore();
   }
 
   function drawCustomerReaction(i, lg){
     const r = lanes[i].reaction;
     if (!r || r.timer <= 0) return;
-
     const p = r.timer / 0.7;
     const alpha = clamp(p, 0, 1);
     const y = lg.customerFaceY - 34 - (1-p) * 8;
 
     ctx.save();
     ctx.globalAlpha = alpha;
-
-    // 背景吹き出しっぽく
     ctx.fillStyle = 'rgba(0,0,0,0.55)';
     roundRectFill(ctx, lg.customerFaceX - 18, y - 18, 36, 22, 6);
-
     ctx.fillStyle = outcomeColor(r.kind);
     ctx.font = '18px sans-serif';
     ctx.textAlign = 'center';
     ctx.fillText(r.text, lg.customerFaceX, y - 2);
-
     ctx.restore();
   }
 
   function drawLaneToast(i, lg, headerLineY){
     const toast = laneToasts[i];
     if (!toast || toast.timer <= 0) return;
-
     const p = toast.timer / 1.1;
     const alpha = clamp(Math.min(1, p * 1.4), 0, 1);
 
-    const boxW = 104;
-    const boxH = 34;
+    const boxW = 104, boxH = 34;
     const x = lg.centerX - boxW/2;
     const y = headerLineY + 10 - (1-p) * 6;
 
     ctx.save();
     ctx.globalAlpha = alpha;
-
     ctx.fillStyle = 'rgba(12,12,12,0.85)';
     ctx.strokeStyle = outcomeColor(toast.kind);
     ctx.lineWidth = 2;
     roundRectFillStroke(ctx, x, y, boxW, boxH, 8);
-
     ctx.fillStyle = outcomeColor(toast.kind);
     ctx.font = '11px sans-serif';
     ctx.textAlign = 'center';
     ctx.fillText(toast.text, lg.centerX, y + 14);
-
     ctx.fillStyle = '#ddd';
     ctx.font = '10px sans-serif';
     ctx.fillText(`注文:${toast.req} / 届:${toast.got}`, lg.centerX, y + 28);
-
     ctx.restore();
   }
 
@@ -870,101 +565,213 @@
     for (const im of impacts){
       const a = clamp(im.life / im.maxLife, 0, 1);
       const col = outcomeColor(im.kind);
-
-      // リング
       ctx.save();
       ctx.globalAlpha = a * 0.9;
       ctx.strokeStyle = col;
       ctx.lineWidth = 3;
-      ctx.beginPath();
-      ctx.arc(im.x, im.y, im.r, 0, Math.PI*2);
-      ctx.stroke();
-
-      // 小さな着弾点
+      ctx.beginPath(); ctx.arc(im.x, im.y, im.r, 0, Math.PI*2); ctx.stroke();
       ctx.globalAlpha = a * 0.5;
       ctx.fillStyle = col;
-      ctx.beginPath();
-      ctx.arc(im.x, im.y, 4, 0, Math.PI*2);
-      ctx.fill();
+      ctx.beginPath(); ctx.arc(im.x, im.y, 4, 0, Math.PI*2); ctx.fill();
       ctx.restore();
     }
   }
 
   function drawLegend(legend){
-    const x = legend.x + 10;
-    const y = legend.y + 14;
-
-    ctx.fillStyle = '#ddd';
-    ctx.font = '16px sans-serif';
-    ctx.textAlign = 'left';
+    const x = legend.x + 10, y = legend.y + 14;
+    ctx.fillStyle = '#ddd'; ctx.font = '16px sans-serif'; ctx.textAlign='left';
     ctx.fillText('硬さ色', x, y);
 
     const rows = [
-      { label:'かた', color: HARDNESS_TABLE[0].color },
-      { label:'普',   color: HARDNESS_TABLE[1].color },
-      { label:'やわ', color: HARDNESS_TABLE[2].color },
-      { label:'のび', color: COLOR_NOBI },
+      { label:'かた', color:HARDNESS_TABLE[0].color },
+      { label:'普',   color:HARDNESS_TABLE[1].color },
+      { label:'やわ', color:HARDNESS_TABLE[2].color },
+      { label:'のび', color:COLOR_NOBI }
     ];
-
     let cy = y + 28;
     for (const r of rows){
-      ctx.fillStyle = r.color;
-      ctx.fillRect(x, cy-12, 18, 12);
-      ctx.strokeStyle = '#555';
-      ctx.strokeRect(x, cy-12, 18, 12);
-
-      ctx.fillStyle = '#ddd';
-      ctx.font = '14px sans-serif';
-      ctx.fillText(`${r.label} ○色`, x + 28, cy - 1);
+      ctx.fillStyle = r.color; ctx.fillRect(x, cy-12, 18, 12);
+      ctx.strokeStyle = '#555'; ctx.strokeRect(x, cy-12, 18, 12);
+      ctx.fillStyle = '#ddd'; ctx.font='14px sans-serif';
+      ctx.fillText(`${r.label} ○色`, x+28, cy-1);
       cy += 28;
     }
-
     cy += 8;
-    ctx.fillStyle = '#aaa';
-    ctx.font = '12px sans-serif';
+    ctx.fillStyle = '#aaa'; ctx.font='12px sans-serif';
     ctx.fillText('白い輪 = ジャスト', x, cy);
-
-    cy += 20;
-    ctx.fillText('◎/○/× = 判定', x, cy);
+    cy += 20; ctx.fillText('◎/○/× = 判定', x, cy);
+    cy += 20; ctx.fillText('客リング = 待ち', x, cy);
+    if (timeLeft <= 15){
+      cy += 24;
+      ctx.fillStyle = '#ffcc66';
+      ctx.fillText('終盤：排出↑', x, cy);
+    }
   }
 
-  function roundRectStroke(ctx, x, y, w, h, r){
+  function draw(){
+    const geo = getLayout();
+    const {W,H,playX,playY,playW,playH,lanesGeo,customerRowY,headerLineY,legend,spout} = geo;
+
+    ctx.clearRect(0,0,W,H);
+    ctx.strokeStyle = '#3a3a3a'; ctx.lineWidth = 2; roundRectStroke(ctx, 6, 6, W-12, H-12, 10);
+    ctx.strokeStyle = '#2a2a2a'; ctx.lineWidth = 1.5; roundRectStroke(ctx, playX, playY, playW, playH, 8);
+    ctx.strokeStyle = '#2a2a2a'; roundRectStroke(ctx, legend.x, playY, legend.w, playH, 8);
+
+    ctx.strokeStyle = '#242424'; ctx.setLineDash([4,6]);
+    ctx.beginPath(); ctx.moveTo(playX + 8, customerRowY + 28); ctx.lineTo(playX + playW - 8, customerRowY + 28); ctx.stroke();
+    ctx.setLineDash([]);
+
+    for (const lg of lanesGeo){
+      ctx.strokeStyle = '#262626'; ctx.setLineDash([6,10]);
+      ctx.beginPath(); ctx.moveTo(lg.centerX, customerRowY + 28); ctx.lineTo(lg.centerX, lg.bottomY); ctx.stroke();
+      ctx.setLineDash([]);
+    }
+
+    // 上段:注文
+    for (let i=0;i<LANE_COUNT;i++){
+      const lg = lanesGeo[i], order = lanes[i].order;
+      ctx.fillStyle = '#ddd'; ctx.font = '20px sans-serif'; ctx.textAlign='center';
+      ctx.fillText(order.target, lg.centerX, headerLineY);
+      drawLaneToast(i, lg, headerLineY);
+    }
+
+    // 客アイコン+待ちゲージ
+    for (let i=0;i<LANE_COUNT;i++){
+      const lg = lanesGeo[i], order = lanes[i].order;
+
+      drawPatienceGauge(lg, order);
+
+      ctx.fillStyle = '#191919'; ctx.strokeStyle = '#666'; ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.arc(lg.customerFaceX, lg.customerFaceY, 24, 0, Math.PI*2); ctx.fill(); ctx.stroke();
+
+      ctx.font='20px sans-serif'; ctx.textAlign='center'; ctx.textBaseline='middle'; ctx.fillStyle='#f2f2f2';
+      ctx.fillText(order.customer.icon, lg.customerFaceX, lg.customerFaceY+1);
+      ctx.textBaseline='alphabetic';
+
+      ctx.fillStyle='#999'; ctx.font='11px sans-serif';
+      ctx.fillText(`${order.patience.toFixed(1)}s`, lg.centerX, lg.customerFaceY + 44);
+
+      drawCustomerReaction(i, lg);
+    }
+
+    // てぼ
+    for (let i=0;i<LANE_COUNT;i++){
+      const lg = lanesGeo[i], b = lg.basket;
+      ctx.fillStyle='#141414'; ctx.strokeStyle='#555'; ctx.lineWidth=2;
+      roundRectFillStroke(ctx, b.x, b.y, b.w, b.h, 8);
+
+      ctx.fillStyle='#d8d8d8'; ctx.font='14px sans-serif'; ctx.textAlign='center';
+      ctx.fillText(`てぼ ${i+1}`, b.cx, b.y + 22);
+
+      for (const n of lanes[i].noodlesInBasket){
+        const h = hardnessByTime(n.cook);
+        ctx.fillStyle = h.color;
+        ctx.beginPath(); ctx.arc(n.x, n.y, n.r, 0, Math.PI*2); ctx.fill();
+
+        if (h.just){
+          ctx.strokeStyle='#fff'; ctx.globalAlpha=0.35; ctx.lineWidth=3;
+          ctx.beginPath(); ctx.arc(n.x,n.y,n.r+3,0,Math.PI*2); ctx.stroke();
+          ctx.globalAlpha=1;
+        }
+      }
+
+      // 吸着可視化（ドラッグ中のみ）
+      if (activeNoodle && activeNoodle.dragging){
+        ctx.save();
+        ctx.strokeStyle='rgba(125,211,252,0.35)';
+        ctx.lineWidth=2;
+        ctx.setLineDash([6,6]);
+        roundRectStroke(ctx, b.x - BASKET_SNAP_MARGIN, b.y - BASKET_SNAP_MARGIN,
+          b.w + BASKET_SNAP_MARGIN*2, b.h + BASKET_SNAP_MARGIN*2, 10);
+        ctx.restore();
+      }
+    }
+
+    // 排出口
+    ctx.fillStyle='#2d2d2d'; ctx.strokeStyle='#777'; ctx.lineWidth=1.5;
+    ctx.fillRect(spout.x,spout.y,spout.w,spout.h); ctx.strokeRect(spout.x,spout.y,spout.w,spout.h);
+    ctx.fillStyle='#ddd'; ctx.font='14px sans-serif'; ctx.textAlign='right';
+    ctx.fillText('めん出る', spout.x - 8, spout.y + 13);
+
+    // 排出口のキャッチ補助リング（排出麺がある時）
+    if (activeNoodle && !activeNoodle.dragging){
+      const sx = spout.x + spout.w*0.5, sy = spout.y + spout.h*0.5;
+      ctx.save();
+      ctx.strokeStyle='rgba(255,255,255,0.12)';
+      ctx.lineWidth=1.5;
+      ctx.beginPath(); ctx.arc(sx, sy, SPOUT_CATCH_RADIUS, 0, Math.PI*2); ctx.stroke();
+      ctx.restore();
+    }
+
+    // 排出中の麺
+    if (activeNoodle){
+      ctx.fillStyle='#f4f4f4'; ctx.strokeStyle='#333'; ctx.lineWidth=2;
+      ctx.beginPath(); ctx.arc(activeNoodle.x, activeNoodle.y, activeNoodle.r, 0, Math.PI*2); ctx.fill(); ctx.stroke();
+
+      if (activeNoodle.missGrace > 0){
+        ctx.save();
+        ctx.globalAlpha = 0.65;
+        ctx.fillStyle='#ffcf8b';
+        ctx.font='11px sans-serif';
+        ctx.textAlign='center';
+        ctx.fillText('もう一度つかめる', activeNoodle.x, activeNoodle.y - 22);
+        ctx.restore();
+      }
+    }
+
+    // 飛行麺
+    for (const f of flying){
+      ctx.save();
+      ctx.globalAlpha = 0.18;
+      ctx.strokeStyle = outcomeColor(f.outcome.kind);
+      ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.moveTo(f.x - f.vx*0.03, f.y - f.vy*0.03); ctx.lineTo(f.x, f.y); ctx.stroke();
+      ctx.restore();
+
+      ctx.fillStyle='#fff';
+      ctx.beginPath(); ctx.arc(f.x,f.y,f.r,0,Math.PI*2); ctx.fill();
+      ctx.strokeStyle=outcomeColor(f.outcome.kind); ctx.lineWidth=2; ctx.stroke();
+    }
+
+    drawImpacts();
+    drawLegend(legend);
+
+    if (timeLeft <= 0){
+      ctx.fillStyle='rgba(0,0,0,0.55)'; ctx.fillRect(0,0,W,H);
+      ctx.fillStyle='#fff'; ctx.font='28px sans-serif'; ctx.textAlign='center';
+      ctx.fillText('時間終了', W/2, H/2 - 10);
+      ctx.font='18px sans-serif'; ctx.fillText(`スコア ${score}`, W/2, H/2 + 24);
+    }
+  }
+
+  function roundRectStroke(ctx,x,y,w,h,r){
     ctx.beginPath();
-    ctx.moveTo(x+r, y);
-    ctx.arcTo(x+w, y, x+w, y+h, r);
-    ctx.arcTo(x+w, y+h, x, y+h, r);
-    ctx.arcTo(x, y+h, x, y, r);
-    ctx.arcTo(x, y, x+w, y, r);
-    ctx.closePath();
-    ctx.stroke();
+    ctx.moveTo(x+r,y);
+    ctx.arcTo(x+w,y,x+w,y+h,r);
+    ctx.arcTo(x+w,y+h,x,y+h,r);
+    ctx.arcTo(x,y+h,x,y,r);
+    ctx.arcTo(x,y,x+w,y,r);
+    ctx.closePath(); ctx.stroke();
   }
-  function roundRectFill(ctx, x, y, w, h, r){
+  function roundRectFill(ctx,x,y,w,h,r){
     ctx.beginPath();
-    ctx.moveTo(x+r, y);
-    ctx.arcTo(x+w, y, x+w, y+h, r);
-    ctx.arcTo(x+w, y+h, x, y+h, r);
-    ctx.arcTo(x, y+h, x, y, r);
-    ctx.arcTo(x, y, x+w, y, r);
-    ctx.closePath();
-    ctx.fill();
+    ctx.moveTo(x+r,y);
+    ctx.arcTo(x+w,y,x+w,y+h,r);
+    ctx.arcTo(x+w,y+h,x,y+h,r);
+    ctx.arcTo(x,y+h,x,y,r);
+    ctx.arcTo(x,y,x+w,y,r);
+    ctx.closePath(); ctx.fill();
   }
-  function roundRectFillStroke(ctx, x, y, w, h, r){
-    roundRectFill(ctx, x, y, w, h, r);
-    ctx.stroke();
-  }
+  function roundRectFillStroke(ctx,x,y,w,h,r){ roundRectFill(ctx,x,y,w,h,r); ctx.stroke(); }
 
   function frame(now){
     const dt = Math.min(0.033, (now - last) / 1000);
-    last = now;
-    t += dt;
-
-    update(dt);
-    draw();
-
+    last = now; t += dt;
+    update(dt); draw();
     requestAnimationFrame(frame);
   }
 
-  ui.resetBtn.addEventListener('click', () => resetGame());
+  ui.resetBtn.addEventListener('click', resetGame);
   ui.adBtn.addEventListener('click', () => {
     lanes[0].auto.enabled = true;
     lanes[0].auto.timeLeft = 12;
