@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,maximum-scale=1,user-scalable=no" />
-  <title>Tebo Shop Prototype v2 - QoL + Tension</title>
+  <title>teboya_takahashi_prototype_v3 - QoL + Tension + Stats</title>
   <style>
     html,body{margin:0;padding:0;background:#111;color:#eee;font-family:system-ui,-apple-system,"Segoe UI",Roboto,"Noto Sans JP",sans-serif}
     #app{min-height:100vh;display:flex;flex-direction:column;align-items:center;padding:10px;box-sizing:border-box;gap:8px}
@@ -18,9 +18,13 @@
 <body>
 <div id="app">
   <div id="topbar">
+    <div class="pill" style="font-weight:700">FILE: <span id="fileLabel">teboya_takahashi_prototype_v3</span></div>
     <div class="pill">残り <span id="timeLeft">45.0</span>s</div>
     <div class="pill">スコア <span id="score">0</span></div>
     <div class="pill">コンボ ×<span id="combo">1</span></div>
+    <div class="pill">成功 <span id="successCount">0</span></div>
+    <div class="pill">注文ミス <span id="wrongOrderCount">0</span></div>
+    <div class="pill">帰宅客 <span id="leftCustomerCount">0</span></div>
     <div class="pill" id="phasePill">通常</div>
     <div class="pill" id="phrase">次！</div>
   </div>
@@ -43,6 +47,9 @@
     timeLeft: document.getElementById('timeLeft'),
     score: document.getElementById('score'),
     combo: document.getElementById('combo'),
+    successCount: document.getElementById('successCount'),
+    wrongOrderCount: document.getElementById('wrongOrderCount'),
+    leftCustomerCount: document.getElementById('leftCustomerCount'),
     phasePill: document.getElementById('phasePill'),
     phrase: document.getElementById('phrase'),
     log: document.getElementById('log'),
@@ -80,6 +87,7 @@
   let score = 0;
   let combo = 1;
   let comboStreak = 0;
+  let stats = { success:0, wrongOrder:0, leftCustomer:0 };
   let phraseTimer = 0;
   let spawnTimer = 0;
 
@@ -168,6 +176,7 @@
 
   function resetGame() {
     t=0; timeLeft=GAME_TIME; score=0; combo=1; comboStreak=0;
+    stats = { success:0, wrongOrder:0, leftCustomer:0 };
     phraseTimer=0; spawnTimer=nextSpawnDelay();
     activeNoodle = null; flying=[]; impacts=[]; initLanes();
     setPhrase('次！',700); log('リセットしました'); syncHud();
@@ -177,6 +186,9 @@
     ui.timeLeft.textContent = timeLeft.toFixed(1);
     ui.score.textContent = String(score);
     ui.combo.textContent = String(combo);
+    ui.successCount.textContent = String(stats.success);
+    ui.wrongOrderCount.textContent = String(stats.wrongOrder);
+    ui.leftCustomerCount.textContent = String(stats.leftCustomer);
     ui.phasePill.textContent = timeLeft <= 15 ? '終盤ラッシュ' : '通常';
   }
   function log(msg){ ui.log.textContent = 'ログ：' + msg; }
@@ -363,6 +375,7 @@
     }
     if (outcome.kind === 'just'){
       log(`ジャスト成功（てぼ${laneIndex+1}）`);
+      stats.success++;
       award(20, true);
       setLaneReaction(laneIndex, 'just');
       setLaneToast(laneIndex, 'just', outcome.req, outcome.got, `JUST! ${outcome.got}`);
@@ -371,6 +384,7 @@
     }
     if (outcome.kind === 'ok'){
       log(`成功（てぼ${laneIndex+1}）`);
+      stats.success++;
       award(10, false);
       setLaneReaction(laneIndex, 'ok');
       setLaneToast(laneIndex, 'ok', outcome.req, outcome.got, `OK ${outcome.got}`);
@@ -379,6 +393,7 @@
     }
 
     log(`硬さミス（${outcome.got}→${outcome.req}）`);
+    stats.wrongOrder++;
     penalty(10);
     order.patience = Math.max(0, order.patience - 2.0);
     setLaneReaction(laneIndex, 'miss');
@@ -433,6 +448,7 @@
         lane.order.patience = Math.max(0, lane.order.patience - dt * currentRushMultiplier());
         if (lane.order.patience === 0){
           penalty(5);
+          stats.leftCustomer++;
           log(`レーン${i+1} 客が帰った…`);
           lane.order = newOrder();
         }
@@ -741,6 +757,8 @@
       ctx.fillStyle='#fff'; ctx.font='28px sans-serif'; ctx.textAlign='center';
       ctx.fillText('時間終了', W/2, H/2 - 10);
       ctx.font='18px sans-serif'; ctx.fillText(`スコア ${score}`, W/2, H/2 + 24);
+      ctx.font='15px sans-serif';
+      ctx.fillText(`成功 ${stats.success} / 注文ミス ${stats.wrongOrder} / 帰宅客 ${stats.leftCustomer}`, W/2, H/2 + 52);
     }
   }
 
